@@ -13,53 +13,24 @@ import matplotlib.pyplot as plt
 import re
 import cv2
 
-def normalize(x):
-    return x / (torch.sqrt(torch.mean(torch.pow(x, 2))) + 1e-5)
+import os
+from os.path import join, split
+
+def get_pose_and_control(im_paths, idx, ordered_joints):
+
+    folder_path, im_name = split(im_paths[idx])
+    _, im_name_next = split(im_paths[idx + 1])
+
+    timestamp_regex = re.compile(r'.*_(\d+\.\d+)\.jpg')
+
+    name_path = join(folder_path, timestamp_regex.sub(r'joint_names_\1.txt', im_name))
+    pose_path = join(folder_path, timestamp_regex.sub(r'joint_pos_\1.txt', im_name))
+    vel_path = join(folder_path, timestamp_regex.sub(r'joint_vel_\1.txt', im_name_next))
 
 
-"""
-def get_heatmap(full_model, pose, image):
-    print(image.shape)
-    print(pose.shape)
-    output = full_model(image.unsqueeze(0), pose.unsqueeze(0))
-    print(output.shape)
-    output_sum = output.sum()
-    # err = K.sum(model.output)
-    conv_output = full_model.conv1.output
-
-    output.backward()
-
-    grads = something
-
-
-    grads = tf.gradients(err, [conv_output])
-    grads = [grad if grad is not None else tf.zeros_like(var) 
-             for var, grad
-             in zip([conv_output], grads)]
-    grads = normalize(grads[0])
-
-    gradient_function = K.function(model.input, [conv_output, grads])
-    out, grad = gradient_function([pose, image])
-
-    grad = np.sqeeze(grad)
-    out = np.squeeze(out)
-    weights = np.mean(grad, axis = (0, 1))
-
-    cam = np.sum(weights.reshape(1,1,-1)*out, axis=2)
-
-    cam = np.abs(cam - np.mean(cam))
-    heatmap = cam / np.max(cam)
-    return cv2.resize(heatmap, (224, 224))
-"""
-
-def get_pose_and_control(name_path, pose_path, vel_path, ordered_joints, idx):
-    ts_regex = re.compile(r'.*_(\d+\.\d+)\.jpg')
-    time_stamp = ts_regex.match(image_paths[idx]).group(1)
-    time_stamp_next = ts_regex.match(image_paths[idx + 1]).group(1)
-
-    names = np.genfromtxt(f"{name_path}_{time_stamp}.txt", dtype=np.str)
-    pose = np.genfromtxt(f"{pose_path}_{time_stamp}.txt")
-    vels = np.genfromtxt(f"{vel_path}_{time_stamp_next}.txt")
+    names = np.genfromtxt(name_path, dtype=np.str)
+    pose = np.genfromtxt(pose_path)
+    vels = np.genfromtxt(vel_path)
 
     # Sometimes the joint names in each file might arrive out of order due to message passing
     # This line ensures joint velocities / poses correspond to joints in a fixed order
@@ -69,35 +40,28 @@ def get_pose_and_control(name_path, pose_path, vel_path, ordered_joints, idx):
 
 class ImagePoseControlDataset(Dataset):
 
-    def __init__(self, image_paths, data_root, arm_joint_names):
-        self.image_paths = image_paths
+    def __init__(self, images_by_demo, arm_joint_names):
+        self.images_by_demo = images_by_demo
         self.arm_joint_names = arm_joint_names
-        self.name_path = f"{data_root}/joint_names"
-        self.pose_path = f"{data_root}/joint_pos"
-        self.vel_path = f"{data_root}/joint_vel"
-    
+
+        # We don't want sampler to pick last image of each demo
+        # because the velocities are taken from the current_image_id + 1
+        self.demos_strides = zip(images_by_demo, strides(images_by_demo, -1))
+
     def __len__(self):
-        # Minus 1 because we don't want sampler to pick last image
-        # the velocities are taken from the currentImgId + 1
-        return len(self.image_paths) - 1
+        return sum(len(demo) - 1 for demo in self.images_by_demo)
 
     def __getitem__(self, idx):
-        np_pose, np_control = get_pose_and_control(
-            self.name_path,
-            self.pose_path,
-            self.vel_path,
-            self.arm_joint_names,
-            idx
-        )
+        demo, demo_stride = find_last(lambda ds: idx >= ds[1], self.demo_strides)
+        img_id = idx - demo_stride
+        np_pose, np_control = get_pose_and_control(demo, img_id, self.arm_joint_names)
 
         # Crop to only the useful area, then scale it up to standard dimensions
-        cropped_img = cv2.imread(self.image_paths[idx])[125:320, 360:450,:]
+        cropped_img = cv2.imread(demo[img_id])[125:320, 360:450,:]
         resized_img = cv2.resize(cropped_img , (224, 224))
         np_img = rescale_pixel_intensities(resized_img)
 
-        # Numpy image: Height x Width x Colour
-        # Torch image: Colour x Height x Width
-        #img = torch.from_numpy(np_img.transpose(2, 0, 1)).to(dtype=torch.float)
+        # Numpy -> Torch =  (Height x Width x Colour) ->  (Colour x Height x Width)
         img = torch.from_numpy(np_img.transpose(2, 0, 1)).to(dtype=torch.float)
         pose = torch.from_numpy(np_pose).to(dtype=torch.float)
         control = torch.from_numpy(np_control).to(dtype=torch.float)
@@ -108,6 +72,14 @@ class ImagePoseControlDataset(Dataset):
 def rescale_pixel_intensities(img):
     scaled_img = img / 127.5 # Divide by half of full image range ([0, 255] -> [0, 2])
     return scaled_img - 1.0 # Translate by 1 [0, 2] -> [-1, 1]
+
+
+def strides(lists, lengths_offset):
+    return np.cumsum([0] + [len(l) + lengths_offset for l in lists[:-1]])
+
+
+def find_last(pred, lst):
+    return next(x for x in reversed(lst) if pred(x))
 
 
 class ImageAndJointsNet(nn.Module):
@@ -150,10 +122,21 @@ def output_size(in_height, in_width, kernel_size, stride=1, padding=0):
 
 #%%
 arm_joint_names = np.genfromtxt("./arm_joint_names.txt", np.str)
-data_root = "./visuomotor_data"
-print("Arm Joints: ", arm_joint_names)
+demos_train_root = "./demos/train"
+demos_test_root = "./demos/test"
 
-image_paths = sorted(glob(f"{data_root}/kinect_colour_*.jpg"))
+train_demo_paths = join(demos_train_root, os.listdir(demos_train_root))
+test_demo_paths = join(demos_test_root, os.listdir(demos_test_root))
+
+train_demos = [sorted(glob(join(demo_path, "kinect_colour_*.jpg"))) for demo_path in train_demo_paths]
+test_demos = [sorted(glob(join(demo_path, "kinect_colour_*.jpg"))) for demo_path in test_demo_paths]
+
+batch_size = 64
+
+train_set = ImagePoseControlDataset(train_demos, arm_joint_names)
+test_set = ImagePoseControlDataset(test_demos, arm_joint_names)
+
+train_loader = DataLoader(train_set, batch_size, shuffle=True)
 
 
 # Train the model
@@ -165,18 +148,6 @@ print(full_model)  # If this isn't enough info, try the "pytorch-summary" packag
 
 optimizer = optim.Adam(full_model.parameters(), eps=1e-7)
 loss_criterion = nn.MSELoss()
-
-batch_size = 64
-train_set = ImagePoseControlDataset(image_paths, data_root, arm_joint_names)
-train_loader = DataLoader(train_set, batch_size, shuffle=True)
-
-#%%
-# Crop area for tower building (and show image to sanity check)
-example_i, example_data = next(enumerate(train_loader, 0))
-loaded_img = example_data["image"][0]
-print(loaded_img[0])
-plt.imshow(loaded_img.permute(1,2,0))
-plt.show()
 
 #%%
 print("Beginning Training")
@@ -237,27 +208,11 @@ for idx in range(200):
     
     c.append(controls.numpy())
 
-    # Get attribution prior
-    # TODO: Q - What is the "attribution prior?"
     im_original = cv2.imread(image_paths[idx])
-
 
     outputs = full_model(im_in.unsqueeze(0), pose.unsqueeze(0))
     cest.append(outputs.data.cpu().numpy())
 
-    """
-    # Set Lxd to size of image, then blur a heatmap onto it
-    heatmap = get_heatmap(full_model, pose, im_in)
-    Lxd = np.zeros((im_original.shape[0],im_original.shape[1]))
-    Lxd[125:320,360:450] = cv2.resize(heatmap,(450-360,320-125))
-
-    Lxd = cv2.GaussianBlur(Lxd**3,(15,15),5)
-    Lxd = Lxd / np.sum(Lxd)
-    """
-
-
-    # Display the relevant portion of the image
-    # Then overlay a semi-transparent "heatmap" on top of it
     img_heatmap_ax.cla()  # cla = Clear axis
     img_heatmap_ax.imshow(im_original[125:320, 320:450, [2,1,0]])
     # img_heatmap_ax.imshow(Lxd[125:320, 360:450], alpha=0.5)
@@ -265,7 +220,7 @@ for idx in range(200):
     # Plot the control velocities over time
     control_ax.cla()
     control_ax.plot(np.squeeze(np.array(c)))
-    control_ax.grid()  # Literally just "show a grid" on the figure
+    control_ax.grid() 
 
     # Plot the estimated velocities over time
     control_est_ax.cla()
