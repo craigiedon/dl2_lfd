@@ -4,3 +4,4 @@ logs/
 .vscode/
 *.pyc
 demos/
+*.mp4
