@@ -20,17 +20,18 @@ class RobotModel:
         
     def update_transforms(self):
         
-        # Hard coded fixed transform to kinect - Todo extract this using kdl or urdf parser , stop using tf
-        # base_link_pos (-0.099238,1.4259,1.028) [-0.09925941262730134, 0.9403368287456643, 1.4206832337255002]
-        # base_link_orientation (0.63661,-0.6365,0.30786,0.30791)
-        #[0.6886035023162357,-0.6887001480258,0.16050631244663915,0.16048378850163286]
+        # Hard coded fixed transform to kinect - 
+        # TODO: extract this using kdl or urdf parser, stop using tf
+
         
         self.m = geometry_msgs.msg.TransformStamped()
         self.m.header.frame_id = 'kinect'
         self.m.child_frame_id = 'base_link'
+
         self.m.transform.translation.x = -0.09925941262730134
         self.m.transform.translation.y = 0.9403368287456643
         self.m.transform.translation.z = 1.4206832337255002
+
         self.m.transform.rotation.x = 0.6886035023162357
         self.m.transform.rotation.y = -0.6887001480258
         self.m.transform.rotation.z = 0.16050631244663915

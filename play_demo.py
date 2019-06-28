@@ -32,30 +32,26 @@ def play_demo_functional(file_glob_pattern):
 
 
 def play_demo(file_glob_pattern):
-    X = np.linspace(0, 2*np.pi, 100)
-    Y = np.sin(X)
-
     f_names = sorted(glob.glob(file_glob_pattern))
-    print(f_names)
 
-    fig, (ax1, ax2) = plt.subplots(1,2)
+    fig = plt.figure()
+    ax1 = fig.add_subplot(1,1,1)
     ims = []
 
     ims = (cv2.imread(f_name) for f_name in f_names)
-    im_arts = [ax1.imshow(im[110:-100, 20:-50, [2, 1, 0]], animated=True) for im in ims]
-    sin_arts = [ax2.plot(X, np.sin(X + t * 0.1), animated=True)[0] for t in range(len(im_arts))]
-    full_arts = [list(a) for a in zip(im_arts, sin_arts)]
-    print(full_arts[0])
+    im_arts = [[ax1.imshow(im[110:-100, 20:-50, [2, 1, 0]], animated=True)] for im in ims]
 
 
-    ani = animation.ArtistAnimation(fig, full_arts, interval=100, blit=True, repeat_delay=1000)
+    ani = animation.ArtistAnimation(fig, im_arts, interval=12, blit=True, repeat_delay=1000)
+    return ani
 
-    plt.show()
 
 
-ani = play_demo_functional("demos/test/Demo_2019-04-25 17:12:24.045983/*.jpg")
-from IPython.display import HTML
-HTML(ani.to_jshtml())
+ani = play_demo("/home/cinnes/visual_servo_induction/visuomotor_data/*.jpg")
+ani.save("demo.mp4")
+print("Saved")
+# from IPython.display import HTML
+# HTML(ani.to_jshtml())
 
 # if __name__ == "__main__":
 #   if len(sys.argv) != 2:

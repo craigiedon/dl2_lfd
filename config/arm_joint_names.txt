@@ -1,4 +1,3 @@
-torso_lift_joint
 r_shoulder_pan_joint
 r_shoulder_lift_joint
 r_upper_arm_roll_joint
