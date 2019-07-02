@@ -137,8 +137,10 @@ def get_pose_and_control(im_paths, idx, ordered_joints):
 
     timestamp_regex = re.compile(r'.*_(\d+\.\d+)\.jpg')
 
-    name_path = join(folder_path, timestamp_regex.sub(r'joint_names_\1.txt', im_name))
-    pose_path = join(folder_path, timestamp_regex.sub(r'joint_pos_\1.txt', im_name))
+    # Note, was changed from having a name file for every time-stamp to a name file for just each demo
+    # name_path = join(folder_path, timestamp_regex.sub(r'joint_names_\1.txt', im_name))
+    name_path = glob(join(folder_path, "joint_names_*.txt"))[0]
+    pose_path = join(folder_path, timestamp_regex.sub(r'joint_position_\1.txt', im_name))
     vel_path = join(folder_path, timestamp_regex.sub(r'joint_vel_\1.txt', im_name_next))
 
 

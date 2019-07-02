@@ -47,7 +47,7 @@ def chart_demo_predictions(model_path, demo_path):
     fig = plt.figure()
 
 
-    for i in range(len(ests)):
+    for i, est in enumerate(ests):
         c_ax = fig.add_subplot(ceil(len(ests) / 3.0), 3, i + 1)
         c_ax.plot(ests[i], label="Estimated Vels")
         c_ax.plot(trues[i], label="True Vels")
