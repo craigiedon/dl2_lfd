@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import matplotlib.pyplot as plt
 from torch import nn, optim
 from load_data import load_demos, save_nums, load_pose_demos
 from helper_funcs.rm import RobotModel
@@ -16,7 +17,7 @@ from helper_funcs.utils import t_stamp, temp_print
 
 # matplotlib.rcParams['animation.embed_limit'] = 100.0
 
-def loss_batch(model, loss_func, batch_id, in_batch, targets, optimizer=None):
+def loss_batch(model, loss_func, batch_id, num_batches, in_batch, targets, optimizer=None):
     # forward + backward + optimize
     loss = loss_func(model(*in_batch), targets)
 
@@ -26,11 +27,11 @@ def loss_batch(model, loss_func, batch_id, in_batch, targets, optimizer=None):
         # zero the parameter gradients
         optimizer.zero_grad()
 
-    temp_print("Batch {} loss: {}".format(batch_id + 1, loss.item()))
+    temp_print("Batch {}/{} loss: {}".format(batch_id + 1, num_batches, loss.item()))
     return loss.item()
 
 def loss_epoch(model, loss_func, d_loader, optimizer=None):
-    losses = [loss_batch(model, loss_func, i, ins, controls, optimizer) for i, (ins, controls) in enumerate(d_loader)]
+    losses = [loss_batch(model, loss_func, i, len(d_loader), ins, controls, optimizer) for i, (ins, controls) in enumerate(d_loader)]
     return sum(losses) / len(losses)
 
 
@@ -84,17 +85,26 @@ robot_model = RobotModel(urdf_path="config/pr2.xml",
                          camera_model=K_kinect)
 
 batch_size = 32
-num_epochs = 300
+num_epochs = 200
 image_glob = "kinect2_qhd_image_color_rect_*.jpg"
 im_height = 224
 im_width = 224
-im_trans = Compose([Crop(115, 300, 0, 450), Resize(224, 224)]) # TODO change to be configurable
+im_trans = Compose([Crop(150, 475, 50, 800), Resize(224, 224)]) # TODO change to be configurable
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 train_set, train_loader = load_demos("./demos/reach_blue_cube", image_glob, batch_size, arm_joint_names, im_trans, True, device, from_demo=0, to_demo=80)
 validation_set, validation_loader = load_demos("./demos/reach_blue_cube", image_glob, batch_size, arm_joint_names, im_trans, False, device, from_demo=80)
 
+
+"""
+# TODO: Move this into an easy-to-use function
+# im_canvas = img_heatmap_ax.imshow(raw_ims[0])
+processed_im = train_set[0][0][0].permute(1,2,0)
+print(processed_im.shape)
+plt.imshow(processed_im)
+plt.show()
+"""
 
 # Train the model
 exp_name = "BlueCubeSmallNet"

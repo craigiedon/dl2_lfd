@@ -29,6 +29,7 @@ class ImageAndJointsNet(nn.Module):
         flattened_conv = torch.flatten(conv3_out, 1)
 
         lin1_out = F.relu(self.linear1(flattened_conv))
+        lin1_out = self.drop_layer(lin1_out)
         lin2_out = F.relu(self.linear2(lin1_out))
 
         image_and_pos = torch.cat((lin2_out, pose_ins), dim=1)

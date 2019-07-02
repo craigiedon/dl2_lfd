@@ -24,10 +24,11 @@ def chart_train_validation_error(train_results_path, validation_results_path):
 
 def chart_demo_predictions(model_path, demo_path):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = load_model(model_path, device)
     joint_names = np.genfromtxt("config/arm_joint_names.txt", np.str)
-    im_trans = Compose([Crop(115, 300, 0, 450), Resize(224, 224)])
-    _, demo_loader = load_demos(demo_path, 32, joint_names, im_trans, True, device, to_demo=1)
+    model = load_model(model_path, device, 224, 224, joint_names)
+    # TODO: This is in multiple places, so I think it needs to be config
+    im_trans = Compose([Crop(150, 475, 50, 800), Resize(224, 224)])
+    _, demo_loader = load_demos(demo_path, "kinect2_qhd_image_color_rect_*.jpg", 32, joint_names, im_trans, True, device, from_demo=1, to_demo=2)
 
     model.eval()
     ests = []
