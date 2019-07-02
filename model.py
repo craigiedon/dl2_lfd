@@ -38,21 +38,46 @@ class ImageAndJointsNet(nn.Module):
         #return {"conv1_out": conv1_out, "conv2_out": conv2_out, "conv3_out": conv3_out, "output": output}
 
 
+class JointsNet(nn.Module):
+    def __init__(self, joint_dim):
+        super(JointsNet, self).__init__()
+        self.drop_layer = nn.Dropout()
+
+        self.linear1 = nn.Linear(joint_dim, 32)
+        self.linear2 = nn.Linear(32, 32)
+        self.linear3 = nn.Linear(32, joint_dim)
+
+    def forward(self, pose_ins):
+
+        lin1_out = F.relu(self.linear1(pose_ins))
+        lin2_out = F.relu(self.linear2(lin1_out))
+        output = self.linear3(lin2_out)
+
+        return output
+
+
 def output_size(in_height, in_width, kernel_size, stride=1, padding=0):
     out_height = int((in_height - kernel_size + padding * 2) / stride) + 1
     out_width = int((in_width - kernel_size + padding * 2) / stride) + 1
     return (out_height, out_width)
 
 
-def setup_model(device):
-    model = ImageAndJointsNet(224, 224, 7)
+def setup_model(device, height, width, joint_names):
+    model = ImageAndJointsNet(height, width, len(joint_names))
     model.to(device)
     print(model)  # If this isn't enough info, try the "pytorch-summary" package
     return model
 
 
-def load_model(model_path, device):
-    model = ImageAndJointsNet(224, 224, 7)
+def load_model(model_path, device, height, width, joint_names):
+    model = ImageAndJointsNet(height, width, len(joint_names))
     model.load_state_dict(torch.load(model_path))
     model.to(device)
+    return model
+
+
+def setup_joints_model(device, joint_names):
+    model = JointsNet(len(joint_names))
+    model.to(device)
+    print(model)
     return model

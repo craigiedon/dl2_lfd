@@ -9,17 +9,27 @@ from helper_funcs.utils import find_last
 from glob import glob
 
 
-def image_demo_paths(demos_root):
+def image_demo_paths(demos_root, image_glob):
     demo_paths = [join(demos_root, d) for d in os.listdir(demos_root)]
-    demo_images = [sorted(glob(join(demo_path, "kinect_colour_*.jpg"))) for demo_path in demo_paths]
+    demo_images = [sorted(glob(join(demo_path, image_glob))) for demo_path in demo_paths]
     return demo_images
 
 
-def load_demos(demos_folder,batch_size, joint_names, im_trans, shuffled, device, from_demo=None, to_demo=None, frame_limit=None):
-    demo_paths = image_demo_paths(demos_folder)
+def load_demos(demos_folder, image_glob, batch_size, joint_names, im_trans, shuffled, device, from_demo=None, to_demo=None, frame_limit=None):
+    demo_paths = image_demo_paths(demos_folder, image_glob)
 
     demos = [d[0:frame_limit] for d in demo_paths[from_demo:to_demo]]
     d_set = ImagePoseControlDataset(demos, joint_names, im_trans)
+    d_loader = DeviceDataLoader(DataLoader(d_set, batch_size, shuffle=shuffled), device)
+
+    return d_set, d_loader
+
+
+def load_pose_demos(demos_folder, image_glob, batch_size, joint_names, shuffled, device, from_demo=None, to_demo=None, frame_limit=None):
+    demo_paths = image_demo_paths(demos_folder, image_glob)
+    demos = [d[0:frame_limit] for d in demo_paths[from_demo:to_demo]]
+
+    d_set = PoseControlDataset(demos, joint_names)
     d_loader = DeviceDataLoader(DataLoader(d_set, batch_size, shuffle=shuffled), device)
 
     return d_set, d_loader
@@ -52,6 +62,30 @@ def send_to_device_rec(xs, device):
     return [send_to_device_rec(x,device) for x in xs]
 
 
+class PoseControlDataset(Dataset):
+    def __init__(self, images_by_demo, arm_joint_names):
+        self.images_by_demo = images_by_demo
+        self.arm_joint_names = arm_joint_names
+
+        # We don't want sampler to pick last image of each demo
+        # because the velocities are taken from the current_image_id + 1
+        self.demo_strides = list(zip(images_by_demo, strides(images_by_demo, -1)))
+
+    def __len__(self):
+        return sum(len(demo) - 1 for demo in self.images_by_demo)
+
+    def __getitem__(self, idx):
+        demo, demo_stride = find_last(lambda ds: idx >= ds[1], self.demo_strides)
+        img_id = idx - demo_stride
+        np_pose, np_control = get_pose_and_control(demo, img_id, self.arm_joint_names)
+
+        # Normalize joint angles by encoding with sin/cos
+        wrapped_pose = np.arctan2(np.sin(np_pose), np.cos(np_pose))
+        pose = torch.from_numpy(wrapped_pose).to(dtype=torch.float)
+
+        control = torch.from_numpy(np_control).to(dtype=torch.float)
+
+        return ((pose,), control) # {"raw_image":raw_img, "image": img, "pose": pose, "control": control}
 
 
 class ImagePoseControlDataset(Dataset):

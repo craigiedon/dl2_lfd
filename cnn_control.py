@@ -1,13 +1,13 @@
 import numpy as np
 import torch
 from torch import nn, optim
-from load_data import load_demos, save_nums
+from load_data import load_demos, save_nums, load_pose_demos
 from helper_funcs.rm import RobotModel
 
 from torchvision.transforms import Compose
 from helper_funcs.transforms import Crop, Resize
 
-from model import setup_model, load_model
+from model import setup_model, load_model, setup_joints_model
 
 
 import os
@@ -36,7 +36,7 @@ def loss_epoch(model, loss_func, d_loader, optimizer=None):
 
 def train(model, train_loader, validation_loader, epochs, save_path=None):
 
-    optimizer = optim.Adam(model.parameters())
+    optimizer = optim.Adam(model.parameters(), eps=1e-7)
     loss_criterion = nn.MSELoss()
 
     print("Beginning Training")
@@ -83,20 +83,24 @@ robot_model = RobotModel(urdf_path="config/pr2.xml",
                          ee_frame='r_gripper_tool_frame',
                          camera_model=K_kinect)
 
-batch_size = 64
+batch_size = 32
 num_epochs = 300
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-im_trans = Compose([Crop(115, 300, 0, 450), Resize(224, 224)])
+image_glob = "kinect2_qhd_image_color_rect_*.jpg"
+im_height = 224
+im_width = 224
+im_trans = Compose([Crop(115, 300, 0, 450), Resize(224, 224)]) # TODO change to be configurable
 
-train_set, train_loader = load_demos("./demos/train", batch_size, arm_joint_names, im_trans, True, device)
-print(len(train_set))
-validation_set, validation_loader = load_demos("./demos/train", batch_size, arm_joint_names, im_trans, False, device)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+train_set, train_loader = load_demos("./demos/reach_blue_cube", image_glob, batch_size, arm_joint_names, im_trans, True, device, from_demo=0, to_demo=80)
+validation_set, validation_loader = load_demos("./demos/reach_blue_cube", image_glob, batch_size, arm_joint_names, im_trans, False, device, from_demo=80)
+
 
 # Train the model
-exp_name = "smallNetATan"
+exp_name = "BlueCubeSmallNet"
 log_path = "./logs/{}-{}".format(exp_name, t_stamp())
-full_model = setup_model(device)
+full_model = setup_model(device, im_height, im_width, arm_joint_names)
 full_model = train(full_model, train_loader, validation_loader, num_epochs, log_path)
 
 # Load an existing model
-load_model(join(log_path, "e2e_control_full.pt"), device)
+# load_model(join(log_path, "e2e_control_full.pt"), device)
