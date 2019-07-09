@@ -1,0 +1,11 @@
+functional
+numpy
+Pillow
+scipy
+textX==1.8.0
+torch
+torchvision
+matplotlib
+sklearn
+configargparse
+sklearn

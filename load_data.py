@@ -4,6 +4,7 @@ import os
 from os.path import join, split
 import re
 import cv2
+import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
 from helper_funcs.utils import find_last
 from glob import glob
@@ -35,7 +36,11 @@ def load_pose_demos(demos_folder, image_glob, batch_size, joint_names, shuffled,
     return d_set, d_loader
 
 
-def save_nums(lines, file_path):
+def save_num_append(n, file_path):
+    with open(file_path, "a") as save_file:
+        save_file.write("{}\n".format(n))
+
+def save_list_nums(lines, file_path):
     with open(file_path, "w") as save_file:
         for l in lines:
             save_file.write("{}\n".format(l))
@@ -121,8 +126,8 @@ class ImagePoseControlDataset(Dataset):
         img = torch.from_numpy(np_img.transpose(2, 0, 1)).to(dtype=torch.float)
 
         # Normalize joint angles by encoding with sin/cos
-        wrapped_pose = np.arctan2(np.sin(np_pose), np.cos(np_pose))
-        pose = torch.from_numpy(wrapped_pose).to(dtype=torch.float)
+        # wrapped_pose = np.arctan2(np.sin(np_pose), np.cos(np_pose))
+        pose = torch.from_numpy(np_pose).to(dtype=torch.float)
 
 
         control = torch.from_numpy(np_control).to(dtype=torch.float)
@@ -159,9 +164,16 @@ def cv_to_nn_input(img):
 
 
 def nn_input_to_imshow(nn_img):
-    raw_im = np.transpose(nn_img.numpy(), (1, 2, 0))
+    raw_im = np.transpose(nn_img.cpu().numpy(), (1, 2, 0))
     return (raw_im + 1.0) / 2.0
 
 
 def strides(lists, lengths_offset):
     return np.cumsum([0] + [len(l) + lengths_offset for l in lists[:-1]])
+
+
+
+def show_torched_im(torched_im):
+    processed_im = nn_input_to_imshow(torched_im)
+    plt.imshow(processed_im)
+    plt.show()

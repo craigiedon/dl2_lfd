@@ -3,6 +3,74 @@ import torch.nn.functional as F
 from torch import nn 
 
 
+class SpatialSoftmax(nn.Module):
+    def __init__(self, h, w):
+        super(SpatialSoftmax, self).__init__()
+        x_inds = torch.arange(w).repeat(h, 1).float()
+        y_inds = torch.arange(h).repeat(w, 1).transpose(0,1).float()
+
+        self.register_buffer("x_inds", x_inds)
+        self.register_buffer("y_inds", y_inds)
+
+
+    def forward(self, ins):
+        n, c, h, w = ins.shape
+
+        flat_maxed = F.softmax(ins.reshape(n, c, -1), dim=2)
+        flat_maxed = flat_maxed.reshape(n, c, h, w)
+
+        expected_xs = (flat_maxed * self.x_inds).sum(dim=(2,3))
+        expected_ys = (flat_maxed * self.y_inds).sum(dim=(2,3))
+
+        feature_points = torch.cat((expected_xs, expected_ys), dim=1)
+
+        return feature_points
+
+
+class LevineNet(nn.Module):
+    def __init__(self, image_height, image_width, joint_dim):
+        super(LevineNet, self).__init__()
+        self.conv1 = nn.Conv2d(in_channels=3, out_channels=64, kernel_size=7, stride=2)
+        self.conv2 = nn.Conv2d(in_channels=64, out_channels=32, kernel_size=5, stride=1)
+        self.conv3 = nn.Conv2d(in_channels=32, out_channels=16, kernel_size=5, stride=1)
+
+        c1_h, c1_w = output_size(image_height, image_width, 7, stride=2)
+        c2_h, c2_w = output_size(c1_h, c1_w, 5)
+        c3_h, c3_w = output_size(c2_h, c2_w, 5)
+
+        self.cout_h, self.cout_w = (c3_h, c3_w)
+
+        self.spatial_sm = SpatialSoftmax(c3_h, c3_w)
+
+        linear_input_size = 16 * 2 + joint_dim
+        hidden_layer_width = 40
+
+        self.linear1 = nn.Linear(linear_input_size, hidden_layer_width)
+        self.linear2 = nn.Linear(hidden_layer_width, hidden_layer_width)
+        self.linear3 = nn.Linear(hidden_layer_width, joint_dim)
+
+        self.aux_outputs = {}
+
+    
+    def forward(self, img_ins, pose_ins):
+        conv1_out = F.relu(self.conv1(img_ins))
+        conv2_out = F.relu(self.conv2(conv1_out))
+        conv3_out = F.relu(self.conv3(conv2_out))
+
+        feature_points = self.spatial_sm(conv3_out)
+
+        full_input = torch.cat((feature_points, pose_ins), dim=1)
+
+        l1_out = F.relu(self.linear1(full_input))
+        l2_out = F.relu(self.linear2(l1_out))
+        l3_out = self.linear3(l2_out)
+
+        self.aux_outputs["conv3_out"] = conv3_out
+        self.aux_outputs["feature_points"] = feature_points
+
+        return l3_out
+
+        
 class ImageAndJointsNet(nn.Module):
     def __init__(self, image_height, image_width, joint_dim):
         super(ImageAndJointsNet, self).__init__()
@@ -36,7 +104,6 @@ class ImageAndJointsNet(nn.Module):
         output = self.linear3(image_and_pos)
 
         return output
-        #return {"conv1_out": conv1_out, "conv2_out": conv2_out, "conv3_out": conv3_out, "output": output}
 
 
 class JointsNet(nn.Module):
@@ -64,14 +131,14 @@ def output_size(in_height, in_width, kernel_size, stride=1, padding=0):
 
 
 def setup_model(device, height, width, joint_names):
-    model = ImageAndJointsNet(height, width, len(joint_names))
+    model = LevineNet(height, width, len(joint_names))
     model.to(device)
     print(model)  # If this isn't enough info, try the "pytorch-summary" package
     return model
 
 
 def load_model(model_path, device, height, width, joint_names):
-    model = ImageAndJointsNet(height, width, len(joint_names))
+    model = LevineNet(height, width, len(joint_names))
     model.load_state_dict(torch.load(model_path))
     model.to(device)
     return model
