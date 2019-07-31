@@ -11,13 +11,14 @@ from glob import glob
 
 
 def image_demo_paths(demos_root, image_glob):
-    demo_paths = [join(demos_root, d) for d in os.listdir(demos_root)]
+    demo_paths = [join(demos_root, d) for d in sorted(os.listdir(demos_root))]
     demo_images = [sorted(glob(join(demo_path, image_glob))) for demo_path in demo_paths]
     return demo_images
 
 
 def load_demos(demos_folder, image_glob, batch_size, joint_names, im_trans, shuffled, device, from_demo=None, to_demo=None, frame_limit=None):
     demo_paths = image_demo_paths(demos_folder, image_glob)
+    print(demo_paths[0][0])
 
     demos = [d[0:frame_limit] for d in demo_paths[from_demo:to_demo]]
     d_set = ImagePoseControlDataset(demos, joint_names, im_trans)
@@ -25,6 +26,19 @@ def load_demos(demos_folder, image_glob, batch_size, joint_names, im_trans, shuf
 
     return d_set, d_loader
 
+
+def load_constant_joint_vals(demos_root, constant_joint_names):
+    demo_folders = [join(demos_root, d) for d in os.listdir(demos_root)]
+    name_path = glob(join(demo_folders[0], "joint_names_*.txt"))[0]
+    pose_path = glob(join(demo_folders[0], "joint_position_*.txt"))[0]
+
+    names = np.genfromtxt(name_path, dtype=np.str).tolist()
+    pose = np.genfromtxt(pose_path)
+
+    joint_ids = np.array([names.index(a) for a in constant_joint_names])
+    relevant_poses = pose[joint_ids]
+    return {n:p for n, p in zip(constant_joint_names, relevant_poses)}
+    
 
 def load_pose_demos(demos_folder, image_glob, batch_size, joint_names, shuffled, device, from_demo=None, to_demo=None, frame_limit=None):
     demo_paths = image_demo_paths(demos_folder, image_glob)
@@ -170,7 +184,6 @@ def nn_input_to_imshow(nn_img):
 
 def strides(lists, lengths_offset):
     return np.cumsum([0] + [len(l) + lengths_offset for l in lists[:-1]])
-
 
 
 def show_torched_im(torched_im):

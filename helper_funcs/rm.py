@@ -1,94 +1,123 @@
 from urdf_parser_py.urdf import URDF
-from pykdl_utils.kdl_parser import kdl_tree_from_urdf_model
-from pykdl_utils.kdl_kinematics import KDLKinematics
-import tf as ros_tf
-import geometry_msgs.msg
-import rospy
 import numpy as np
+from scipy.spatial.transform import Rotation as R
+from load_data import get_pose_and_control
+import math
 
-class RobotModel:
-    
-    def __init__(self,urdf_path,base_frame,ee_frame,camera_model):
-        
+
+class RobotModel():
+    def __init__(self, urdf_path, base_frame, end_effector_frame, camera_model, constant_params=None):
         self.robot = URDF.from_xml_file(urdf_path)
-        self.kdl_kin = KDLKinematics(self.robot,base_frame,ee_frame)
-        self.dim = len(self.kdl_kin.get_joint_names())
-        self.K = camera_model
-        self.transform = ros_tf.TransformerROS(True, rospy.Duration(100))
-        self.update_transforms()
-        
-        
-    def update_transforms(self):
-        
-        # Hard coded fixed transform to kinect - 
-        # TODO: extract this using kdl or urdf parser, stop using tf
+        self.base_frame_ee = base_frame
+        self.end_effector_frame = end_effector_frame
+        self.camera_model = camera_model
+        chain_names = self.robot.get_chain(base_frame, end_effector_frame, joints=True, links=False, fixed=False)
+        self.joint_chain = [self.robot.joint_map[jn] for jn in chain_names]
+        if constant_params is not None:
+            self.constant_params = constant_params
+        else:
+            self.constant_params = {}
 
-        
-        self.m = geometry_msgs.msg.TransformStamped()
-        self.m.header.frame_id = 'kinect'
-        self.m.child_frame_id = 'base_link'
 
-        self.m.transform.translation.x = -0.09925941262730134
-        self.m.transform.translation.y = 0.9403368287456643
-        self.m.transform.translation.z = 1.4206832337255002
+def limits_joint(joint_name, robot_model):
+    joint = robot_model.robot.joint_map[joint_name]
 
-        self.m.transform.rotation.x = 0.6886035023162357
-        self.m.transform.rotation.y = -0.6887001480258
-        self.m.transform.rotation.z = 0.16050631244663915
-        self.m.transform.rotation.w =  0.16048378850163286
-        self.transform.setTransform(self.m)
-                
-    def joint_angle_sampler(self):
-        in_image = False
-        while not in_image:
-            joints = self.kdl_kin.random_joint_angles()
-            joint_im = self.project_camera(joints)
-#             #215:350,140:370,:
-            if (joint_im[0] < 140) | (joint_im[0] > 370) | (joint_im[1] < 215) | (joint_im[1] > 350):
-                in_image = False
-            else:
-                in_image = True
-        return joints
-    
-    def control(self,theta,theta_d,Kp):
-        return -Kp*(theta-theta_d)
-    
-    def roll_out_2d(self,theta,theta_d,Kp,N,dt):
-        return [self.project_camera(th) for th in self.roll_out_3d(theta,theta_d,Kp,N,dt)]
-        
-    def roll_out_3d(self,theta,theta_d,Kp,N,dt):
-        th_list = [theta]
-        for j in range(N):
-            th_list.append(th_list[-1] + self.control(th_list[-1],theta_d,Kp)*dt)
-        return th_list
+    if joint.type == "continuous":
+        return None
+    return (joint.limit.lower, joint.limit.upper)
 
-    def FK(self,q):
-        return self.kdl_kin.forward(q)
-    
-    def IK(self,pose):
-        return self.kdl_kin.inverse(pose)
-    
-    def project_camera(self,q):
-        
-        T = self.FK(q)
-        self.update_transforms()
-        
-        ros_tf.TransformerROS.asMatrix
-        
-        pose = geometry_msgs.msg.PoseStamped()
-        pose.header.frame_id = 'base_link'
-        pose.pose.position.x = T[0,-1]
-        pose.pose.position.y = T[1,-1]
-        pose.pose.position.z = T[2,-1]
-        q = ros_tf.transformations.quaternion_from_matrix(T)
-        pose.pose.orientation.x = q[0]
-        pose.pose.orientation.y = q[1]
-        pose.pose.orientation.z = q[2]
-        pose.pose.orientation.w = q[3]
-        
-        point_kinect_frame = self.transform.transformPose('kinect',pose)
-        
-        Xe = np.array(((point_kinect_frame.pose.position.x),(point_kinect_frame.pose.position.y),(point_kinect_frame.pose.position.z)))
-        
-        xim = self.K.dot(Xe)
-        return xim/xim[2]
+def joints_lower_limits(joint_names, rm):
+    lower_lims = []
+    for jn in joint_names:
+        joint_lims = limits_joint(jn, rm)
+        if joint_lims is not None:
+            lower_lims.append(joint_lims[0])
+        else:
+            lower_lims.append(None)
+
+    return lower_lims
+
+def joints_upper_limits(joint_names, rm):
+    upper_lims = []
+    for jn in joint_names:
+        joint_lims = limits_joint(jn, rm)
+        if joint_lims is not None:
+            upper_lims.append(joint_lims[1])
+        else:
+            upper_lims.append(None)
+
+    return upper_lims
+
+def joint_types(joint_names, rm):
+    return {jn: rm.robot.joint_map[jn].type for jn in joint_names}
+
+
+def rotation_matrix(angle, rotation_axis):
+    """ Takes an angle (radians) and axis of rotation (3-D vector) and outputs a rotation matrix"""
+    normed_axis = rotation_axis / np.linalg.norm(rotation_axis)
+    rot_vec = R.from_rotvec(normed_axis * angle)
+    return R.as_dcm(rot_vec)
+
+
+def transformation_matrix(joint, param):
+
+    if joint.type == "revolute" or joint.type == "continuous": # Rotational Joint
+        translation = np.array(joint.origin.xyz).reshape(-1, 1) # Translate along link
+        rot = rotation_matrix(param, np.array(joint.axis)) # Rotate around axis
+        rotation_translation = np.hstack((rot, translation))
+
+        zero_row = np.zeros((1,4))
+
+        T = np.vstack((rotation_translation, zero_row))
+        T[3,3] = 1
+
+        return T
+
+    if joint.type == "prismatic": # Translational Joint
+        origin = np.array(joint.origin.xyz)
+        axis = np.array(joint.axis)
+        translation = origin + param * axis # First translate up link, then move the amount along the axis
+
+        rotation_translation = np.hstack((np.eye(3), translation.reshape(-1,1)))
+
+        T = np.vstack((rotation_translation, np.zeros((1,4))))
+        T[3,3] = 1
+        return T
+
+    # Otherwise the joint type must be the identity
+    return np.eye(4)
+
+
+def forward_kinematics_matrix(joint_params, joint_param_names, robot_model):
+    T = np.eye(4)
+    for joint in robot_model.joint_chain:
+        if joint.name in joint_param_names:
+            joint_idx = np.where(joint_param_names == joint.name)[0][0]
+            Tn = transformation_matrix(joint, joint_params[joint_idx].item())
+        elif joint.name in robot_model.constant_params:
+            Tn = transformation_matrix(joint, robot_model.constant_params[joint.name])
+        else:
+            raise ValueError("{} not in param/constant map.\n Param Names: {}\n Constant Map: {}".format(
+                joint.name, joint_param_names, robot_model.constant_params))
+
+        T = np.matmul(T, Tn)
+    return T
+
+
+def forward_kinematics(joint_params, joint_param_names, robot_model):
+    fk_matrix = forward_kinematics_matrix(joint_params, joint_param_names, robot_model)
+    return np.matmul(fk_matrix, np.array([0.0,0.0,0.0,1.0]))[0:3]
+
+
+if __name__ == "__main__":
+    rm = RobotModel("config/pr2.xml", 'base_link', 'r_gripper_tool_frame', None)
+    arm_joint_names = np.genfromtxt("config/arm_joint_names.txt", np.str)
+    pose, vels = get_pose_and_control(["demos/reach_blue_cube/demo_2019_07_01_12_21_27/kinect2_qhd_image_color_rect_1561980089061739626.jpg",
+    "demos/reach_blue_cube/demo_2019_07_01_12_21_27/kinect2_qhd_image_color_rect_1561980089061739626.jpg"], 0, arm_joint_names)
+    print(pose)
+    fk_mat = forward_kinematics_matrix(pose, arm_joint_names, joint_param_map, rm)
+    print(fk_mat)
+    print("FK Shape", fk_mat.shape)
+    print("Pose shape", pose.shape)
+    ee_pos = np.matmul(fk_mat, np.array([0,0,0,1]))
+    print(ee_pos)

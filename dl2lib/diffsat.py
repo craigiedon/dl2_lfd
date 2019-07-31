@@ -3,6 +3,8 @@ import numpy as np
 import torch
 from functools import reduce
 
+EPS = 1e-8
+
 def diffsat_theta(a, b, **kwargs):
     return torch.abs(a - b)
 
@@ -22,11 +24,11 @@ class BoolConst:
     def __init__(self, x):
         self.x = x.float()
 
-    def loss(self, args):
+    def loss(self):
         return 1.0 - self.x
 
-    def satisfy(self, args):
-        ret = self.x > (1 - args.eps)
+    def satisfy(self):
+        ret = self.x > (1 - EPS)
         return ret
 
 class GT(Condition):
@@ -36,13 +38,10 @@ class GT(Condition):
         self.a = a
         self.b = b
 
-    def loss(self, args):
-        if args.use_eps:
-            return torch.clamp(diffsat_delta(self.b + args.eps, self.a), min=0.0)
-        else:
-            return torch.clamp(diffsat_delta(self.b, self.a), min=0.0) + torch.eq(self.a, self.b).type(self.a.type())
+    def loss(self):
+        return torch.clamp(diffsat_delta(self.b, self.a), min=0.0) + torch.eq(self.a, self.b).type(self.a.type())
 
-    def satisfy(self, args):
+    def satisfy(self):
         return self.a > self.b
 
 
@@ -53,13 +52,10 @@ class LT(Condition):
         self.a = a
         self.b = b
 
-    def loss(self, args):
-        if args.use_eps:
-            return torch.clamp(diffsat_delta(self.a + args.eps, self.b), min=0.0)
-        else:
-            return torch.clamp(diffsat_delta(self.a, self.b), min=0.0) + torch.eq(self.a, self.b).type(self.a.type())
+    def loss(self):
+        return torch.clamp(diffsat_delta(self.a, self.b), min=0.0) + torch.eq(self.a, self.b).type(self.a.type())
             
-    def satisfy(self, args):
+    def satisfy(self):
         return self.a < self.b
 
 
@@ -69,11 +65,11 @@ class EQ(Condition):
         self.a = a
         self.b = b
 
-    def loss(self, args):
+    def loss(self):
         return diffsat_theta(self.a, self.b)
 
-    def satisfy(self, args):
-        return torch.abs(self.a - self.b) < args.eps
+    def satisfy(self):
+        return torch.abs(self.a - self.b) < EPS
 
 class GEQ(Condition):
     """ a >= b """
@@ -82,10 +78,10 @@ class GEQ(Condition):
         self.a = a
         self.b = b
 
-    def loss(self, args):
+    def loss(self):
         return torch.clamp(diffsat_delta(self.b, self.a), min=0.0)
 
-    def satisfy(self, args):
+    def satisfy(self):
         return self.a >= self.b
 
 
@@ -96,10 +92,10 @@ class LEQ(Condition):
         self.a = a
         self.b = b
 
-    def loss(self, args):
+    def loss(self):
         return torch.clamp(diffsat_delta(self.a, self.b), min=0.0)
 
-    def satisfy(self, args):
+    def satisfy(self):
         return self.a <= self.b
 
 class And(Condition):
@@ -108,14 +104,14 @@ class And(Condition):
     def __init__(self, exprs):
         self.exprs = exprs
 
-    def loss(self, args):
-        losses = [exp.loss(args) for exp in self.exprs]
+    def loss(self):
+        losses = [exp.loss() for exp in self.exprs]
         return reduce(lambda a, b: a + b, losses)
 
-    def satisfy(self, args):
+    def satisfy(self):
         ret = None
         for exp in self.exprs:
-            sat = exp.satisfy(args)
+            sat = exp.satisfy()
             if not isinstance(sat, np.ndarray):
                 sat = sat.cpu().numpy()
             if ret is None:
@@ -130,17 +126,14 @@ class Or(Condition):
     def __init__(self, exprs):
         self.exprs = exprs
 
-    def loss(self, args):
-        losses = [exp.loss(args) for exp in self.exprs]
-        if getattr(args, 'or') == 'mul':
-            return reduce(lambda a, b: a * b, losses)
-        elif getattr(args, 'or') == 'min':
-            return torch.cat(losses).min()
+    def loss(self):
+        losses = [exp.loss() for exp in self.exprs]
+        return reduce(lambda a, b: a * b, losses)
 
-    def satisfy(self, args):
+    def satisfy(self):
         ret = None
         for exp in self.exprs:
-            sat = exp.satisfy(args)
+            sat = exp.satisfy()
             if not isinstance(sat, np.ndarray):
                 sat = sat.cpu().numpy()
             if ret is None:
@@ -155,11 +148,11 @@ class Implication(Condition):
         self.b = b
         self.t = Or([Negate(a), b])
 
-    def loss(self, args):
-        return self.t.loss(args)
+    def loss(self):
+        return self.t.loss()
 
-    def satisfy(self, args):
-        return self.t.satisfy(args)
+    def satisfy(self):
+        return self.t.satisfy()
 
 class Negate(Condition):
 
@@ -189,11 +182,11 @@ class Negate(Condition):
         else:
             assert False, 'Class not supported %s' % str(type(exp))
 
-    def loss(self, args):
-        return self.neg.loss(args)
+    def loss(self):
+        return self.neg.loss()
 
-    def satisfy(self, args):
-        return self.neg.satisfy(args)
+    def satisfy(self):
+        return self.neg.satisfy()
 
 
 

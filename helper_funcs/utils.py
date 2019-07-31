@@ -1,5 +1,5 @@
 from datetime import datetime
-import sys
+import json
 import torch
 
 def find_last(pred, lst):
@@ -10,9 +10,14 @@ def t_stamp():
 
 
 def temp_print(s):
-    print (s + '\r'),
-    sys.stdout.flush()
+    print(s, end='\r', flush=True)
 
 
 def zip_chunks(tensor, num_chunks, dim=0):
     return torch.stack(torch.chunk(tensor, num_chunks, dim), dim).transpose(dim,dim+1)
+
+
+def load_json(file_path):
+    with open(file_path, 'r') as fp:
+        data = json.load(fp)
+    return data

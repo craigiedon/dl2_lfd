@@ -1,4 +1,5 @@
 class AnimType(Enum):
+    
     JS = 0,
     HTML5 = 1,
     MP4 = 2,
