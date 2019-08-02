@@ -23,7 +23,6 @@ def general_attack(input_batch, target_batch, constraint, domains, num_restarts,
     inp_batch_size = input_batch.size()[0]
     num_global_vars = len(domains)
 
-    # TODO: Is this the desired shape?
     for _ in range(num_restarts):
         z_batches = np.array([[domains[j][i].sample() for i in range(inp_batch_size)] 
                      for j in range(num_global_vars)])

@@ -2,7 +2,7 @@ import numpy as np
 import torch
 from torch import nn, optim
 from load_data import load_demos, save_num_append, show_torched_im, load_constant_joint_vals
-from constraints import JointLimitsConstraint, EndEffectorPosConstraint
+from constraints import JointLimitsConstraint, EndEffectorPosConstraint, StayInZone, MoveSlowly, MatchOrientation, SmoothMotion
 
 from torchvision.transforms import Compose
 from helper_funcs.transforms import Crop, Resize
@@ -133,13 +133,6 @@ train_set, train_loader = load_demos(
 validation_set, validation_loader = load_demos(
     demo_folder, im_params["file_glob"], batch_size, nn_joint_names, im_trans, False, device, from_demo=80)
 
-
-
-"""
-for ((_, pose), _) in validation_set:
-    fk = forward_kinematics(pose.cpu().numpy(), nn_joint_names, robot_model)
-    print(fk)
-"""
         
 # Train the model
 exp_name = "BlueCubeLevineNet"
@@ -152,13 +145,10 @@ upper_bounds=  joints_upper_limits(nn_joint_names, robot_model)
 print(lower_bounds)
 print(upper_bounds)
 
-# TODO: Is this dt too high? How are proposed torques evaluated?
-# constraint = JointLimitsConstraint(full_model, lower_bounds, upper_bounds, dt=1.0)
-constraint = EndEffectorPosConstraint(full_model, 0.5, nn_joint_names, robot_model, dt=0.05)
-"""
-for in_batch, control_batch in validation_loader:
-    print(constraint.loss(in_batch, control_batch, None, None))
-"""
+constraint = StayInZone(full_model, mbs, maxbs, nn_joint_names, robot_model)
+constraint = MoveSlowly(full_model, 2.0, nn_joint_names, robot_model)
+constraint = MatchOrientation(full_model, target_orientation, nn_joint_names, robot_model)
+constraint = SmoothMotion(full_model, 0.5, nn_joint_names, robot_model)
 
 print(constraint)
 full_model = train(full_model, train_loader, validation_loader,

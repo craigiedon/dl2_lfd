@@ -109,15 +109,25 @@ def forward_kinematics(joint_params, joint_param_names, robot_model):
     return np.matmul(fk_matrix, np.array([0.0,0.0,0.0,1.0]))[0:3]
 
 
+def forward_kinematics_orientation(rot_axis_4d, joint_params, joint_param_names, robot_model):
+    fk_matrix = forward_kinematics_matrix(joint_params, joint_param_names, robot_model)
+    fk_matrix[0:3, 3] = 0 # Throw away translation part
+    orientation = np.matmul(fk_matrix, rot_axis_4d) 
+    return orientation
+
+
+"""
 if __name__ == "__main__":
     rm = RobotModel("config/pr2.xml", 'base_link', 'r_gripper_tool_frame', None)
     arm_joint_names = np.genfromtxt("config/arm_joint_names.txt", np.str)
     pose, vels = get_pose_and_control(["demos/reach_blue_cube/demo_2019_07_01_12_21_27/kinect2_qhd_image_color_rect_1561980089061739626.jpg",
     "demos/reach_blue_cube/demo_2019_07_01_12_21_27/kinect2_qhd_image_color_rect_1561980089061739626.jpg"], 0, arm_joint_names)
     print(pose)
-    fk_mat = forward_kinematics_matrix(pose, arm_joint_names, joint_param_map, rm)
+    fk_mat = forward_kinematics_matrix(pose, arm_joint_names, rm)
     print(fk_mat)
     print("FK Shape", fk_mat.shape)
     print("Pose shape", pose.shape)
     ee_pos = np.matmul(fk_mat, np.array([0,0,0,1]))
     print(ee_pos)
+
+"""
