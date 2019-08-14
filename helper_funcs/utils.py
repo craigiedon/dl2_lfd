@@ -10,7 +10,8 @@ def t_stamp():
 
 
 def temp_print(s):
-    print(s, end='\r', flush=True)
+    # print(s, end='\r', flush=True)
+    print("Not implemented tempPrint for python2")
 
 
 def zip_chunks(tensor, num_chunks, dim=0):

@@ -63,10 +63,8 @@ def act(last_img, last_pos, model, arm_publisher, vel_dt):
 
 def setup_moveit_group(group_name):
     moveit_commander.roscpp_initialize(sys.argv)
-    reference_frame = "/odom_combined"
 
     group = moveit_commander.MoveGroupCommander(group_name)
-    group.set_pose_reference_frame(reference_frame)
     group.set_goal_tolerance(0.001)
     group.set_planning_time(2.)
     group.set_max_velocity_scaling_factor(0.5)
@@ -101,12 +99,12 @@ class RobotStateCache(object):
 
 
 def main():
+    rospy.init_node('pr2_mover', anonymous=True)
+    moveit_commander.roscpp_initialize(sys.argv)
     r = rospy.Rate(0.5)
 
-    moveit_commander.roscpp_initialize(sys.argv)
-
     pr2_left = setup_moveit_group("left_arm")
-    pr2_right = setup_moveit_group("right_arm")
+    # pr2_right = setup_moveit_group("right_arm")
 
     left_command = rospy.Publisher('/l_arm_controller/command_filter', JointTrajectory, queue_size=1)
 
