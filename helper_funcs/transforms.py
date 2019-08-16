@@ -1,14 +1,16 @@
 import cv2
 
 class Crop(object):
-    def __init__(self, top, bottom, left, right):
+    def __init__(self, top, left, height, width):
         self.top = top
-        self.bottom = bottom
         self.left = left
-        self.right = right
+        self.height = height
+        self.width = width
     
     def __call__(self, img):
-        return img[self.top:self.bottom, self.left:self.right, :]
+        return img[self.top:self.top + self.height,
+                   self.left:self.left + self.width,
+                   :]
 
 
 class Resize(object):

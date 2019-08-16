@@ -1,6 +1,7 @@
 from datetime import datetime
 import json
 import torch
+from collections import defaultdict
 
 def find_last(pred, lst):
     return next(x for x in reversed(lst) if pred(x))
@@ -10,8 +11,8 @@ def t_stamp():
 
 
 def temp_print(s):
-    # print(s, end='\r', flush=True)
-    print("Not implemented tempPrint for python2")
+    print(s, end='\r', flush=True)
+    # print("Not implemented tempPrint for python2")
 
 
 def zip_chunks(tensor, num_chunks, dim=0):
@@ -21,4 +22,13 @@ def zip_chunks(tensor, num_chunks, dim=0):
 def load_json(file_path):
     with open(file_path, 'r') as fp:
         data = json.load(fp)
+    return data
+
+def load_json_lines(file_path):
+    data = defaultdict(list)
+    with open(file_path, 'r') as fp:
+        for line in fp:
+            j_dict = json.loads(line)
+            for k, v in j_dict.items():
+                data[k].append(v)
     return data

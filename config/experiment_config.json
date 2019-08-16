@@ -1,0 +1,28 @@
+{
+    "experiment_name": "GearInsertUnconstrained",
+    "demo_folder": "./demos/gear_good",
+    "nn_joint_names": [
+        "l_shoulder_pan_joint",
+        "l_shoulder_lift_joint",
+        "l_upper_arm_roll_joint",
+        "l_elbow_flex_joint",
+        "l_forearm_roll_joint",
+        "l_wrist_flex_joint",
+        "l_wrist_roll_joint"
+    ],
+    "constant_joint_names": [
+        "torso_lift_joint"
+    ],
+    "batch_size": 32,
+    "epochs": 150,
+    "constr_weight": 0.1,
+    "image_config": {
+        "file_glob": "kinect2_qhd_image_color_rect_*.jpg",
+        "crop_top": 120,
+        "crop_left": 200,
+        "crop_width": 590,
+        "crop_height": 460,
+        "resize_height": 128,
+        "resize_width": 128
+    }
+}

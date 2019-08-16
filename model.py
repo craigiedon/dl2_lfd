@@ -74,20 +74,63 @@ class LevineNet(nn.Module):
 class ImageAndJointsNet(nn.Module):
     def __init__(self, image_height, image_width, joint_dim):
         super(ImageAndJointsNet, self).__init__()
-        self.conv1 = nn.Conv2d(3, 3, 7)
-        self.conv2 = nn.Conv2d(3, 3, 5)
-        self.conv3 = nn.Conv2d(3, 3, 3)
+        self.conv1 = nn.Conv2d(in_channels=3, out_channels=32, kernel_size=4, stride=2)
+        self.conv2 = nn.Conv2d(in_channels=32, out_channels=32, kernel_size=4, stride=2)
+        self.conv3 = nn.Conv2d(in_channels=32, out_channels=32, kernel_size=4, stride=2)
         self.drop_layer = nn.Dropout()
 
-        o_height, o_width = output_size(image_height, image_width, 7)
-        o_height, o_width = output_size(o_height, o_width, 5)
-        o_height, o_width = output_size(o_height, o_width, 3)
+        print("Kernel Size: {}".format(self.conv1.kernel_size))
+        o_height, o_width = output_size(image_height, image_width, self.conv1.kernel_size[0], stride=2)
+        o_height, o_width = output_size(o_height, o_width, self.conv2.kernel_size[0], stride=2)
+        o_height, o_width = output_size(o_height, o_width, self.conv3.kernel_size[0], stride=2)
 
-        linear_input_size = o_height * o_width * 3
+        linear_input_size = o_height * o_width * self.conv3.out_channels
 
         self.linear1 = nn.Linear(linear_input_size, 32)
-        self.linear2 = nn.Linear(32, 32)
+        self.linear2 = nn.Linear(32 + joint_dim, 32 + joint_dim)
         self.linear3 = nn.Linear(32 + joint_dim, joint_dim)
+
+
+    def forward(self, img_ins, pose_ins):
+        conv1_out = F.leaky_relu(self.conv1(img_ins))
+        conv2_out = F.leaky_relu(self.conv2(conv1_out))
+        conv3_out = F.leaky_relu(self.conv3(conv2_out))
+
+        flattened_conv = torch.flatten(conv3_out, 1)
+
+        lin1_out = F.leaky_relu(self.linear1(flattened_conv))
+        # lin1_out = self.drop_layer(lin1_out)
+
+        image_and_pos = torch.cat((lin1_out, pose_ins), dim=1)
+
+        lin2_out = F.leaky_relu(self.linear2(image_and_pos))
+
+        output = self.linear3(lin2_out)
+
+        return output
+
+
+"""
+class ImageOnlyNet(nn.Module):
+    def __init__(self, image_height, image_width, joint_dim):
+        super(ImageOnlyNet, self).__init__()
+        self.conv1 = nn.Conv2d(in_channels=3, out_channels=32, kernel_size=4, stride=2)
+        self.conv2 = nn.Conv2d(in_channels=32, out_channels=32, kernel_size=4, stride=2)
+        self.conv3 = nn.Conv2d(in_channels=32, out_channels=32, kernel_size=4, stride=2)
+        self.drop_layer = nn.Dropout()
+
+        print("Kernel Size: {}".format(self.conv1.kernel_size))
+        o_height, o_width = output_size(image_height, image_width, self.conv1.kernel_size[0], stride=2)
+        o_height, o_width = output_size(o_height, o_width, self.conv2.kernel_size[0], stride=2)
+        o_height, o_width = output_size(o_height, o_width, self.conv3.kernel_size[0], stride=2)
+
+        linear_input_size = o_height * o_width * self.conv3.out_channels
+
+        hidden_units = 32
+        self.linear1 = nn.Linear(linear_input_size, hidden_units)
+        self.linear2 = nn.Linear(hidden_units, hidden_units)
+        self.linear3 = nn.Linear(hidden_units, joint_dim)
+
 
     def forward(self, img_ins, pose_ins):
         conv1_out = F.relu(self.conv1(img_ins))
@@ -97,13 +140,13 @@ class ImageAndJointsNet(nn.Module):
         flattened_conv = torch.flatten(conv3_out, 1)
 
         lin1_out = F.relu(self.linear1(flattened_conv))
-        lin1_out = self.drop_layer(lin1_out)
+        # lin1_out = self.drop_layer(lin1_out)
         lin2_out = F.relu(self.linear2(lin1_out))
 
-        image_and_pos = torch.cat((lin2_out, pose_ins), dim=1)
-        output = self.linear3(image_and_pos)
+        output = self.linear3(lin2_out)
 
         return output
+"""
 
 
 class JointsNet(nn.Module):
@@ -131,14 +174,14 @@ def output_size(in_height, in_width, kernel_size, stride=1, padding=0):
 
 
 def setup_model(device, height, width, joint_names):
-    model = LevineNet(height, width, len(joint_names))
+    model = ImageAndJointsNet(height, width, len(joint_names))
     model.to(device)
     print(model)  # If this isn't enough info, try the "pytorch-summary" package
     return model
 
 
 def load_model(model_path, device, height, width, joint_names):
-    model = LevineNet(height, width, len(joint_names))
+    model = ImageOnlyNet(height, width, len(joint_names))
     model.load_state_dict(torch.load(model_path))
     model.to(device)
     return model

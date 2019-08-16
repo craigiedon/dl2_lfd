@@ -4,6 +4,7 @@ import os
 from os.path import join, split
 import re
 import cv2
+import json
 import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
 from helper_funcs.utils import find_last
@@ -50,9 +51,9 @@ def load_pose_demos(demos_folder, image_glob, batch_size, joint_names, shuffled,
     return d_set, d_loader
 
 
-def save_num_append(n, file_path):
+def save_dict_append(d, file_path):
     with open(file_path, "a") as save_file:
-        save_file.write("{}\n".format(n))
+        save_file.write("{}\n".format(json.dumps(d)))
 
 def save_list_nums(lines, file_path):
     with open(file_path, "w") as save_file:
@@ -173,13 +174,16 @@ def get_pose_and_control(im_paths, idx, ordered_joints):
 
 
 def cv_to_nn_input(img):
-    scaled_img = img / 127.5 # Divide by half of full image range ([0, 255] -> [0, 2])
-    return scaled_img - 1.0 # Translate by 1 [0, 2] -> [-1, 1]
+    # scaled_img = img / 127.5 # Divide by half of full image range ([0, 255] -> [0, 2])
+    # offset_img = scaled_img - 1.0 # Translate by 1 [0, 2] -> [-1, 1]
+    # return offset_img
+    return img / 255.0
 
 
 def nn_input_to_imshow(nn_img):
-    raw_im = np.transpose(nn_img.cpu().numpy(), (1, 2, 0))
-    return (raw_im + 1.0) / 2.0
+    #raw_im = np.transpose(nn_img.cpu().numpy(), (1, 2, 0))
+    #return (raw_im + 1.0) / 2.0
+    return np.transpose(nn_img.cpu().numpy(), (1,2,0))
 
 
 def strides(lists, lengths_offset):

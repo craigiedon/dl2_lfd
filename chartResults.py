@@ -8,17 +8,32 @@ from model import load_model
 from load_data import load_demos, nn_input_to_imshow
 import numpy as np
 import torch
-from helper_funcs.utils import zip_chunks
+from helper_funcs.utils import zip_chunks, load_json, load_json_lines
 
 from torchvision.transforms import Compose
 from helper_funcs.transforms import Crop, Resize
 
+"""
 def chart_train_validation_error(train_results_path, validation_results_path):
     training_df = pd.read_csv(train_results_path, sep=" ", header=None, names=["error"])
     print(training_df)
     validation_df = pd.read_csv(validation_results_path, sep=" ", header=None, names=["error"])
     plt.plot(training_df.error, label="Train")
     plt.plot(validation_df.error, label="Validation")
+    plt.xlabel("Epoch")
+    plt.ylabel("Average MSE")
+    plt.legend()
+    plt.show()
+"""
+
+def chart_train_validation_error(train_path, val_path):
+    # Load in the states from both as json lists
+    training_stats = load_json_lines(train_path)
+    val_stats = load_json_lines(val_path)
+
+    plt.plot(training_stats["training_loss"], label="Train")
+    plt.plot(val_stats["training_loss"], label="Validation")
+
     plt.xlabel("Epoch")
     plt.ylabel("Average MSE")
     plt.legend()
@@ -125,17 +140,17 @@ def chart_demo_predictions(model_path, demo_path, demo_num):
 
 # Run it through the device, get the results, and display them. This should already be in the animation thing
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print("Usage: chartResults.py <results-path> <demos-folder>")
+    if len(sys.argv) != 4:
+        print("Usage: chartResults.py <results-path> <demos-folder> <demo-num>")
         sys.exit(0)
 
     log_path = sys.argv[1]
     demos_folder = sys.argv[2]
-    demo_num = 82
+    demo_num = sys.argv[3]
     model_path = "{}/e2e_control_full.pt".format(log_path)
 
     chart_train_validation_error("{}/train.txt".format(log_path),
                                  "{}/validation.txt".format(log_path))
 
-    chart_demo_predictions(model_path, demos_folder, demo_num)
-    animate_spatial_features(model_path, demos_folder, demo_num)
+    # chart_demo_predictions(model_path, demos_folder, demo_num)
+    # animate_spatial_features(model_path, demos_folder, demo_num)
