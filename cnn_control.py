@@ -11,6 +11,8 @@ from helper_funcs.rm import RobotModel, joints_lower_limits, joints_upper_limits
 from model import setup_model, setup_joints_model
 from oracle import evaluate_constraint
 
+from collections import defaultdict
+
 
 import os
 from os.path import join 
@@ -46,18 +48,15 @@ def loss_batch(model, loss_func, batch_id, num_batches, in_batch, targets, args,
             "constr_acc": constr_acc.item() if constraint is not None else constr_acc,
             "full_loss": full_loss.item()}
 
+
 def loss_epoch(model, loss_func, d_loader, args, constraint=None, optimizer=None):
-    epoch_losses = {"training_loss": [],
-                    "constr_loss": [],
-                    "constr_acc": [],
-                    "full_loss": []}
+    epoch_losses = defaultdict(list)
+
     for i, (ins, controls) in enumerate(d_loader):
         loss_metrics = loss_batch(model, loss_func, i, len(d_loader), ins, controls, args, constraint, optimizer)
 
-        epoch_losses["training_loss"].append(loss_metrics["training_loss"])
-        epoch_losses["constr_loss"].append(loss_metrics["constr_loss"])
-        epoch_losses["constr_acc"].append(loss_metrics["constr_acc"])
-        epoch_losses["full_loss"].append(loss_metrics["full_loss"])
+        for k, v in loss_metrics.items():
+            epoch_losses.append(v)
 
     return {metric: np.mean(vals) for metric, vals in epoch_losses.items()}
 
@@ -71,8 +70,20 @@ def train(model, train_loader, validation_loader, epochs, constraint, args, save
 
     if not os.path.exists(save_path):
         os.makedirs(save_path)
+
+    print("Epoch 0")
+    # Getting the starting error for train and validation set, so no need to record grads
+    model.eval()
+    with torch.no_grad():
+        # Training
+        avg_loss_train = loss_epoch(model, loss_criterion, train_loader, args, constraint)
+        save_dict_append(avg_loss_train, join(save_path, "train.txt"))
+
+        # Validation
+        avg_loss_validation = loss_epoch(model, loss_criterion, validation_loader, args, constraint)
+        save_dict_append(avg_loss_validation, join(save_path, "validation.txt"))
     
-    for epoch in range(epochs):
+    for epoch in range(1, epochs + 1):
         print("Epoch {}".format(epoch))
         # Training
         model.train()
