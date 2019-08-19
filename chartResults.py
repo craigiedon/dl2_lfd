@@ -5,7 +5,7 @@ import matplotlib.animation as animation
 import sys
 from math import ceil
 from model import load_model
-from load_data import load_demos, nn_input_to_imshow
+from load_data import load_demos, nn_input_to_imshow, show_torched_im
 import numpy as np
 import torch
 from helper_funcs.utils import zip_chunks, load_json, load_json_lines
@@ -98,15 +98,28 @@ def animate_spatial_features(model_path, demos_folder, demo_num):
 
 def chart_demo_predictions(model_path, demo_path, demo_num):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    joint_names = np.genfromtxt("config/arm_joint_names.txt", np.str)
+    exp_config = load_json("config/experiment_config.json")
     # TODO: This is in multiple places, so I think it needs to be config
-    im_h, im_w = (240, 240)
-    crop_t, crop_b, crop_l, crop_r = (150, 475, 50, 800)
+    im_params = exp_config["image_config"]
 
-    model = load_model(model_path, device, im_h, im_w, joint_names)
-    im_trans = Compose([Crop(crop_t, crop_b, crop_l, crop_r), Resize(im_h, im_w)])
+    im_trans = Compose([Crop(im_params["crop_top"], im_params["crop_left"],
+                             im_params["crop_height"], im_params["crop_width"]),
+                        Resize(im_params["resize_height"], im_params["resize_width"])])
+    model = load_model(model_path, device, im_params["resize_height"], im_params["resize_width"], exp_config["nn_joint_names"])
 
-    _, demo_loader = load_demos(demo_path, "kinect2_qhd_image_color_rect_*.jpg", 32, joint_names, im_trans, True, device, from_demo=demo_num, to_demo=demo_num + 1)
+    demo_set, demo_loader = load_demos(
+        demo_path,
+        im_params["file_glob"],
+        exp_config["batch_size"],
+        exp_config["nn_joint_names"],
+        im_trans,
+        False,
+        device,
+        from_demo=demo_num,
+        to_demo=demo_num + 1
+    )
+
+    show_torched_im(demo_set[0][0][0])
 
     model.eval()
     ests = []
@@ -131,7 +144,7 @@ def chart_demo_predictions(model_path, demo_path, demo_num):
         c_ax.plot(ests[i], label="Estimated Vels")
         c_ax.plot(trues[i], label="True Vels")
         c_ax.legend()
-        c_ax.title.set_text(joint_names[i])
+        c_ax.title.set_text(exp_config["nn_joint_names"][i])
         c_ax.set_xlabel("t")
         c_ax.set_ylabel("Velocity")
     
@@ -146,11 +159,15 @@ if __name__ == "__main__":
 
     log_path = sys.argv[1]
     demos_folder = sys.argv[2]
-    demo_num = sys.argv[3]
+    demo_num = int(sys.argv[3])
     model_path = "{}/e2e_control_full.pt".format(log_path)
 
     chart_train_validation_error("{}/train.txt".format(log_path),
                                  "{}/validation.txt".format(log_path))
 
-    # chart_demo_predictions(model_path, demos_folder, demo_num)
+    """
+    for i in [43, 82, 101]:
+        print(i)
+        chart_demo_predictions(model_path, demos_folder, i)
     # animate_spatial_features(model_path, demos_folder, demo_num)
+    """
