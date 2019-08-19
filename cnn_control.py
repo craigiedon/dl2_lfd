@@ -137,7 +137,7 @@ train_set, train_loader = load_demos(
     True,
     device,
     from_demo=0,
-    to_demo=80)
+    to_demo=60)
 
 validation_set, validation_loader = load_demos(
     exp_config["demo_folder"],
@@ -147,7 +147,8 @@ validation_set, validation_loader = load_demos(
     im_trans,
     False,
     device,
-    from_demo=80)
+    from_demo=60,
+    to_demo=80)
 
 
 """
