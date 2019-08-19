@@ -181,7 +181,7 @@ def setup_model(device, height, width, joint_names):
 
 
 def load_model(model_path, device, height, width, joint_names):
-    model = ImageOnlyNet(height, width, len(joint_names))
+    model = ImageAndJointsNet(height, width, len(joint_names))
     model.load_state_dict(torch.load(model_path))
     model.to(device)
     return model
