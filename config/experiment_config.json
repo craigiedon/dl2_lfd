@@ -14,7 +14,7 @@
         "torso_lift_joint"
     ],
     "batch_size": 32,
-    "epochs": 150,
+    "epochs": 100,
     "constr_weight": 0.1,
     "image_config": {
         "file_glob": "kinect2_qhd_image_color_rect_*.jpg",

@@ -19,7 +19,7 @@ def image_demo_paths(demos_root, image_glob):
 
 def load_demos(demos_folder, image_glob, batch_size, joint_names, im_trans, shuffled, device, from_demo=None, to_demo=None, frame_limit=None):
     demo_paths = image_demo_paths(demos_folder, image_glob)
-    print(demo_paths[0][0])
+    print(demo_paths[from_demo][0])
 
     demos = [d[0:frame_limit] for d in demo_paths[from_demo:to_demo]]
     d_set = ImagePoseControlDataset(demos, joint_names, im_trans)
@@ -141,13 +141,17 @@ class ImagePoseControlDataset(Dataset):
         img = torch.from_numpy(np_img.transpose(2, 0, 1)).to(dtype=torch.float)
 
         # Normalize joint angles by encoding with sin/cos
-        # wrapped_pose = np.arctan2(np.sin(np_pose), np.cos(np_pose))
-        pose = torch.from_numpy(np_pose).to(dtype=torch.float)
+        wrapped_pose = wrap_pose(np_pose)
+        pose = torch.from_numpy(wrapped_pose).to(dtype=torch.float)
 
 
         control = torch.from_numpy(np_control).to(dtype=torch.float)
 
         return ((img, pose), control) # {"raw_image":raw_img, "image": img, "pose": pose, "control": control}
+
+def wrap_pose(unbounded_rads):
+    pi_bounded_rads = np.arctan2(np.sin(unbounded_rads), np.cos(unbounded_rads)) # bound between [-pi, pi]
+    return (pi_bounded_rads + np.pi) / (np.pi * 2.0) # bound between [0, 1]
 
 
 def get_pose_and_control(im_paths, idx, ordered_joints):
