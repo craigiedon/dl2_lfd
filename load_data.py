@@ -17,12 +17,14 @@ def image_demo_paths(demos_root, image_glob):
     return demo_images
 
 
-def load_demos(demos_folder, image_glob, batch_size, joint_names, im_trans, shuffled, device, from_demo=None, to_demo=None, frame_limit=None):
+def load_demos(demos_folder, image_glob, batch_size, joint_names,
+               im_trans, shuffled, device, from_demo=None, to_demo=None,
+               frame_limit=None):
     demo_paths = image_demo_paths(demos_folder, image_glob)
     print(demo_paths[from_demo][0])
 
     demos = [d[0:frame_limit] for d in demo_paths[from_demo:to_demo]]
-    d_set = ImagePoseControlDataset(demos, joint_names, im_trans)
+    d_set = ImagePoseFuturePoseDataSet(demos, joint_names, im_trans)
     d_loader = DeviceDataLoader(DataLoader(d_set, batch_size, shuffle=shuffled), device)
 
     return d_set, d_loader
@@ -54,6 +56,13 @@ def load_pose_demos(demos_folder, image_glob, batch_size, joint_names, shuffled,
 def save_dict_append(d, file_path):
     with open(file_path, "a") as save_file:
         save_file.write("{}\n".format(json.dumps(d)))
+
+
+def save_list_append(xs, file_path):
+    with open(file_path, "a") as save_file:
+        for x in xs:
+            save_file.write("{}\n".format(x))
+
 
 def save_list_nums(lines, file_path):
     with open(file_path, "w") as save_file:
@@ -149,6 +158,52 @@ class ImagePoseControlDataset(Dataset):
 
         return ((img, pose), control) # {"raw_image":raw_img, "image": img, "pose": pose, "control": control}
 
+
+class ImagePoseFuturePoseDataSet(Dataset):
+
+    def __init__(self, images_by_demo, arm_joint_names, im_transform=None):
+        self.images_by_demo = images_by_demo
+        self.arm_joint_names = arm_joint_names
+        self.im_transform = im_transform
+        self.predict_interval = 5
+
+        # We don't want sampler to pick last x images of each demo
+        # because we are predicting positions on current instance + x
+        self.demo_strides = list(zip(images_by_demo, strides(images_by_demo, -self.predict_interval)))
+
+    def __len__(self):
+        return sum(len(demo) - self.predict_interval for demo in self.images_by_demo)
+
+    
+    def __getitem__(self, idx):
+        demo, demo_stride = find_last(lambda ds: idx >= ds[1], self.demo_strides)
+        img_id = idx - demo_stride
+
+        # TODO: Implement get_pose_next_pose
+        np_pose, np_next_pose = get_pose_next_pose(demo, img_id, self.arm_joint_names, self.predict_interval)
+
+        
+        # Convert image format
+        raw_img = cv2.imread(demo[img_id])[:, :, [2, 1, 0]] # BGR -> RGB Colour Indexing
+        if self.im_transform is None:
+            transformed_im = raw_img
+        else:
+            transformed_im = self.im_transform(raw_img)
+
+        np_img = cv_to_nn_input(transformed_im)
+
+        # Numpy -> Torch =  (Height x Width x Colour) ->  (Colour x Height x Width)
+        img = torch.from_numpy(np_img.transpose(2, 0, 1)).to(dtype=torch.float)
+
+        # Normalize joint angles by encoding with sin/cos
+        wrapped_pose = wrap_pose(np_pose)
+        pose = torch.from_numpy(wrapped_pose).to(dtype=torch.float)
+
+        wrapped_next_pose = wrap_pose(np_next_pose)
+        next_pose = torch.from_numpy(wrapped_next_pose).to(dtype=torch.float)
+
+        return ((img, pose), next_pose) # {"raw_image":raw_img, "image": img, "pose": pose, "control": control}
+
 def wrap_pose(unbounded_rads):
     pi_bounded_rads = np.arctan2(np.sin(unbounded_rads), np.cos(unbounded_rads)) # bound between [-pi, pi]
     return (pi_bounded_rads + np.pi) / (np.pi * 2.0) # bound between [0, 1]
@@ -175,6 +230,26 @@ def get_pose_and_control(im_paths, idx, ordered_joints):
     # This line ensures joint velocities / poses correspond to joints in a fixed order
     joint_idxs = np.array([names.tolist().index(a) for a in ordered_joints])
     return pose[joint_idxs], vels[joint_idxs]
+
+
+def get_pose_next_pose(im_paths, idx, ordered_joints, pred_interval):
+    folder_path, im_name = split(im_paths[idx])
+    _, im_name_next = split(im_paths[idx + pred_interval])
+
+    timestamp_regex = re.compile(r'.*_(\d+)\.jpg')
+
+    name_path = glob(join(folder_path, "joint_names_*.txt"))[0]
+    pose_path = join(folder_path, timestamp_regex.sub(r'joint_position_\1.txt', im_name))
+    next_pose_path = join(folder_path, timestamp_regex.sub(r'joint_position_\1.txt', im_name_next))
+
+    names = np.genfromtxt(name_path, dtype=np.str)
+    pose = np.genfromtxt(pose_path)
+    next_pose = np.genfromtxt(next_pose_path)
+
+    # Sometimes the joint names in each file might arrive out of order due to message passing
+    # This line ensures joint poses correspond to joints in a fixed order
+    joint_idxs = np.array([names.tolist().index(a) for a in ordered_joints])
+    return pose[joint_idxs], next_pose[joint_idxs]
 
 
 def cv_to_nn_input(img):

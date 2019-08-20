@@ -8,7 +8,7 @@ import cv2
 import geometry_msgs
 
 from model import load_model
-from load_data import cv_to_nn_input, nn_input_to_imshow
+from load_data import cv_to_nn_input, nn_input_to_imshow, load_demos
 
 # ROS
 import rospy # Ros Itself
@@ -68,6 +68,13 @@ def act(last_state, model, arm_publisher, vel_dt):
     send_left_arm_goal(new_pos, arm_publisher)
     """
 
+def open_loop_act(last_id, data_set, arm_publisher):
+    if last_id >= len(data_set):
+        print("Gone through dataset, waiting here")
+
+    (pos, img), next_pos = data_set[i]
+    send_left_arm_goal(next_pos, arm_publisher))
+
 def setup_moveit_group(group_name):
     moveit_commander.roscpp_initialize(sys.argv)
 
@@ -109,6 +116,72 @@ class RobotStateCache(object):
         all_names = joint_state.name
         self.joint_pos = [j_pos[all_names.index(jn)] for jn in self.joint_names]
 
+
+def sanity_check():
+    rospy.init_node('pr2_mover', anonymous=True)
+    moveit_commander.roscpp_initialize(sys.argv)
+    r = rospy.Rate(0.5)
+
+    pr2_left = setup_moveit_group("left_arm")
+    pr2_right = setup_moveit_group("right_arm")
+
+    left_command = rospy.Publisher('/l_arm_controller/command', JointTrajectory, queue_size=1)
+
+    joint_names = ['l_upper_arm_roll_joint',
+                   'l_shoulder_pan_joint',
+                   'l_shoulder_lift_joint',
+                   'l_forearm_roll_joint',
+                   'l_elbow_flex_joint',
+                   'l_wrist_flex_joint',
+                   'l_wrist_roll_joint']
+
+
+    device = torch.device("cuda")
+
+    """
+    model = load_model(model_path, device, height, width, joint_names)
+    """
+
+    exp_config = load_json("config/experiment_config.json")
+    constant_param_map = load_constant_joint_vals(exp_config["demo_folder"], exp_config["constant_joint_names"])
+    im_params = exp_config["image_config"]
+    im_trans = Compose([
+        Crop(im_params["crop_top"], im_params["crop_left"],
+            im_params["crop_height"], im_params["crop_width"]),
+        Resize(im_params["resize_height"], im_params["resize_width"])])
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    train_set, train_loader = load_demos(
+        exp_config["demo_folder"],
+        im_params["file_glob"],
+        exp_config["batch_size"],
+        exp_config["nn_joint_names"],
+        im_trans,
+        False,
+        device,
+        from_demo=0,
+        to_demo=1)
+
+
+    ### Setup robot in initial pose using the moveit controllers
+    move_to_position_rotation(pr2_right, [0.576, -0.462, 0.910], [-1.765, 0.082, 1.170])
+
+    right = pr2_right.get_current_pose().pose
+    left_pos = [right.position.x + 0.1, right.position.y + 0.49, right.position.z + 0.05]
+    left_rpy = [math.pi/2.0, 0.0, -math.pi/2.0]
+    success = move_to_position_rotation(pr2_left, left_pos, left_rpy)
+
+
+    print('Robot policy Prepared.')
+    i = 0
+    while not rospy.is_shutdown():
+        print('Check some things...')
+        open_loop_act(i, data_set, left_command)
+        i += 1
+        r.sleep()
+
+    print('Done.')
 
 def main():
     rospy.init_node('pr2_mover', anonymous=True)

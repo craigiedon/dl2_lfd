@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 from torch import nn, optim
-from load_data import load_demos, save_dict_append, show_torched_im, load_constant_joint_vals
+from load_data import load_demos, save_dict_append, save_list_append, show_torched_im, load_constant_joint_vals
 from constraints import JointLimitsConstraint, EndEffectorPosConstraint, StayInZone, MoveSlowly, MatchOrientation, SmoothMotion
 
 from torchvision.transforms import Compose
@@ -56,9 +56,13 @@ def loss_epoch(model, loss_func, d_loader, args, constraint=None, optimizer=None
         loss_metrics = loss_batch(model, loss_func, i, len(d_loader), ins, controls, args, constraint, optimizer)
 
         for k, v in loss_metrics.items():
-            epoch_losses.append(v)
+            epoch_losses[k].append(v)
 
-    return {metric: np.mean(vals) for metric, vals in epoch_losses.items()}
+    return epoch_losses
+
+
+def mean_dict(d):
+    return {metric: np.mean(vals) for metric, vals in d.items()}
 
 
 def train(model, train_loader, validation_loader, epochs, constraint, args, save_path):
@@ -76,18 +80,24 @@ def train(model, train_loader, validation_loader, epochs, constraint, args, save
     model.eval()
     with torch.no_grad():
         # Training
-        avg_loss_train = loss_epoch(model, loss_criterion, train_loader, args, constraint)
+        avg_loss_train = mean_dict(loss_epoch(model, loss_criterion, train_loader, args, constraint))
         save_dict_append(avg_loss_train, join(save_path, "train.txt"))
 
         # Validation
-        avg_loss_validation = loss_epoch(model, loss_criterion, validation_loader, args, constraint)
+        avg_loss_validation = mean_dict(loss_epoch(model, loss_criterion, validation_loader, args, constraint))
         save_dict_append(avg_loss_validation, join(save_path, "validation.txt"))
     
+    print()
+    
+    # Actual learning Epochs
     for epoch in range(1, epochs + 1):
         print("Epoch {}".format(epoch))
         # Training
         model.train()
-        avg_loss_train = loss_epoch(model, loss_criterion, train_loader, args, constraint, optimizer)
+        losses_train = loss_epoch(model, loss_criterion, train_loader, args, constraint, optimizer)
+        avg_loss_train = mean_dict(losses_train)
+
+        save_list_append(losses_train["training_loss"], join(save_path, "batches-train.txt"))
         save_dict_append(avg_loss_train, join(save_path, "train.txt"))
 
         temp_print("{}\t{}\t-".format(epoch, avg_loss_train))
@@ -95,7 +105,10 @@ def train(model, train_loader, validation_loader, epochs, constraint, args, save
         # Validation
         model.eval()
         with torch.no_grad():
-            avg_loss_validation = loss_epoch(model, loss_criterion, validation_loader, args, constraint)
+            losses_validation = loss_epoch(model, loss_criterion, validation_loader, args, constraint)
+            avg_loss_validation = mean_dict(losses_validation)
+
+            save_list_append(losses_validation["training_loss"], join(save_path, "batches-validation.txt"))
             save_dict_append(avg_loss_validation, join(save_path, "validation.txt"))
 
         print("Train: {}".format(avg_loss_train))

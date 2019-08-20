@@ -26,6 +26,19 @@ def chart_train_validation_error(train_results_path, validation_results_path):
     plt.show()
 """
 
+def chart_error_batches(results_path, group_every=1):
+    training_df = pd.read_csv(results_path, sep=" ", header=None, names=["error"])
+    training_df = training_df.groupby(training_df.index // group_every).mean()
+    print(training_df)
+    # validation_df = pd.read_csv(val_path, sep=" ", header=None, names=["error"])
+    plt.plot(training_df.error, label="Results")
+    # plt.plot(validation_df.error, label="Validation")
+    plt.xlabel("Epoch")
+    plt.ylabel("Average MSE")
+    plt.legend()
+    plt.show()
+
+
 def chart_train_validation_error(train_path, val_path):
     # Load in the states from both as json lists
     training_stats = load_json_lines(train_path)
@@ -96,6 +109,55 @@ def animate_spatial_features(model_path, demos_folder, demo_num):
     return ani
             
 
+def chart_demo_joint_trajectories(demo_path, demo_num):
+    exp_config = load_json("config/experiment_config.json")
+    # TODO: This is in multiple places, so I think it needs to be config
+    im_params = exp_config["image_config"]
+
+    im_trans = Compose([Crop(im_params["crop_top"], im_params["crop_left"],
+                             im_params["crop_height"], im_params["crop_width"]),
+                        Resize(im_params["resize_height"], im_params["resize_width"])])
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    demo_set, demo_loader = load_demos(
+        demo_path,
+        im_params["file_glob"],
+        exp_config["batch_size"],
+        exp_config["nn_joint_names"],
+        im_trans,
+        False,
+        device,
+        from_demo=demo_num,
+        to_demo=demo_num + 1
+    )
+
+    joint_poses = []
+    next_poses = []
+    with torch.no_grad():
+        for ins, targets in demo_loader:
+            _, in_pos = ins
+            joint_pos = [x.cpu().numpy() for x in in_pos]
+            next_pos = [x.cpu().numpy() for x in targets]
+
+            joint_poses.extend(joint_pos)
+            next_poses.extend(next_pos)
+
+    joint_poses = np.array(joint_poses).transpose()
+    next_poses = np.array(next_poses).transpose()
+
+    fig = plt.figure()
+
+    for i, _ in enumerate(joint_poses):
+        c_ax = fig.add_subplot(ceil(len(joint_poses) / 3.0), 3, i + 1)
+        c_ax.plot(joint_poses[i], label="Joint Poses")
+        c_ax.plot(next_poses[i], label="Next Poses")
+        c_ax.legend()
+        c_ax.title.set_text(exp_config["nn_joint_names"][i])
+        c_ax.set_xlabel("t")
+        c_ax.set_ylabel("Normed Angle")
+    
+    plt.show()
+
 def chart_demo_predictions(model_path, demo_path, demo_num):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     exp_config = load_json("config/experiment_config.json")
@@ -119,34 +181,42 @@ def chart_demo_predictions(model_path, demo_path, demo_num):
         to_demo=demo_num + 1
     )
 
-    show_torched_im(demo_set[0][0][0])
+    # show_torched_im(demo_set[0][0][0])
 
     model.eval()
+    currents = []
     ests = []
     trues = []
-    with torch.no_grad():
-        for (ins, true_controls) in demo_loader:
-            est_controls = model(*ins)
-            est_controls = [x.cpu().numpy() for x in est_controls]
-            true_controls = [x.cpu().numpy() for x in true_controls]
 
-            ests.extend(est_controls)
-            trues.extend(true_controls)
+    with torch.no_grad():
+        for (ins, targets) in demo_loader:
+            _, current_pos = ins
+            est_next = model(*ins)
+            est_next = [x.cpu().numpy() for x in est_next]
+            true_next = [x.cpu().numpy() for x in targets]
+            current_pos = [x.cpu().numpy() for x in current_pos]
+
+            ests.extend(est_next)
+            trues.extend(true_next)
+            currents.extend(current_pos)
 
     ests = np.array(ests).transpose()
     trues = np.array(trues).transpose()
+    currents = np.array(currents).transpose()
 
     fig = plt.figure()
 
 
     for i, _ in enumerate(ests):
         c_ax = fig.add_subplot(ceil(len(ests) / 3.0), 3, i + 1)
-        c_ax.plot(ests[i], label="Estimated Vels")
-        c_ax.plot(trues[i], label="True Vels")
+        c_ax.plot()
+        # c_ax.plot(currents[i], label="Current Joint")
+        c_ax.plot(ests[i], label="Estimated Next Joints")
+        c_ax.plot(trues[i], label="True Next Joints")
         c_ax.legend()
         c_ax.title.set_text(exp_config["nn_joint_names"][i])
         c_ax.set_xlabel("t")
-        c_ax.set_ylabel("Velocity")
+        c_ax.set_ylabel("Normed Radians")
     
     plt.show()
     
@@ -165,9 +235,4 @@ if __name__ == "__main__":
     chart_train_validation_error("{}/train.txt".format(log_path),
                                  "{}/validation.txt".format(log_path))
 
-    """
-    for i in [43, 82, 101]:
-        print(i)
-        chart_demo_predictions(model_path, demos_folder, i)
-    # animate_spatial_features(model_path, demos_folder, demo_num)
-    """
+    chart_demo_predictions(model_path, demos_folder, demo_num)

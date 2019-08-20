@@ -75,9 +75,15 @@ class ImageAndJointsNet(nn.Module):
     def __init__(self, image_height, image_width, joint_dim):
         super(ImageAndJointsNet, self).__init__()
         self.conv1 = nn.Conv2d(in_channels=3, out_channels=32, kernel_size=4, stride=2)
+        self.conv1_bn = nn.BatchNorm2d(self.conv1.out_channels)
+
         self.conv2 = nn.Conv2d(in_channels=32, out_channels=32, kernel_size=4, stride=2)
+        self.conv2_bn = nn.BatchNorm2d(self.conv2.out_channels)
+
         self.conv3 = nn.Conv2d(in_channels=32, out_channels=32, kernel_size=4, stride=2)
-        self.drop_layer = nn.Dropout()
+        self.conv3_bn = nn.BatchNorm2d(self.conv3.out_channels)
+        # self.drop_layer = nn.Dropout()
+
 
         print("Kernel Size: {}".format(self.conv1.kernel_size))
         o_height, o_width = output_size(image_height, image_width, self.conv1.kernel_size[0], stride=2)
@@ -87,18 +93,26 @@ class ImageAndJointsNet(nn.Module):
         linear_input_size = o_height * o_width * self.conv3.out_channels
 
         self.linear1 = nn.Linear(linear_input_size, 32)
+        self.linear1_bn = nn.BatchNorm1d(self.linear1.out_features)
+
         self.linear2 = nn.Linear(32 + joint_dim, 32 + joint_dim)
         self.linear3 = nn.Linear(32 + joint_dim, joint_dim)
 
 
     def forward(self, img_ins, pose_ins):
-        conv1_out = F.leaky_relu(self.conv1(img_ins))
-        conv2_out = F.leaky_relu(self.conv2(conv1_out))
-        conv3_out = F.leaky_relu(self.conv3(conv2_out))
+        conv1_out = F.leaky_relu(self.conv1_bn(self.conv1(img_ins)))
+        conv2_out = F.leaky_relu(self.conv2_bn(self.conv2(conv1_out)))
+        conv3_out = F.leaky_relu(self.conv3_bn(self.conv3(conv2_out)))
+
+        # conv1_out = F.leaky_relu(self.conv1(img_ins))
+        # conv2_out = F.leaky_relu(self.conv2(conv1_out))
+        # conv3_out = F.leaky_relu(self.conv3(conv2_out))
+
 
         flattened_conv = torch.flatten(conv3_out, 1)
 
-        lin1_out = F.leaky_relu(self.linear1(flattened_conv))
+        lin1_out = F.leaky_relu(self.linear1_bn(self.linear1(flattened_conv)))
+        # lin1_out = F.leaky_relu(self.linear1(flattened_conv))
         # lin1_out = self.drop_layer(lin1_out)
 
         image_and_pos = torch.cat((lin1_out, pose_ins), dim=1)
