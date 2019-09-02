@@ -8,7 +8,9 @@ import json
 import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
 from helper_funcs.utils import find_last
+from helper_funcs.utils_image import random_distort
 from glob import glob
+from PIL import Image
 
 
 def image_demo_paths(demos_root, image_glob):
@@ -19,11 +21,15 @@ def image_demo_paths(demos_root, image_glob):
 
 def load_demos(demos_folder, image_glob, batch_size, joint_names,
                im_trans, shuffled, device, from_demo=None, to_demo=None,
-               frame_limit=None):
+               frame_limit=None, skip_count=1):
     demo_paths = image_demo_paths(demos_folder, image_glob)
     print(demo_paths[from_demo][0])
 
-    demos = [d[0:frame_limit] for d in demo_paths[from_demo:to_demo]]
+    demos = [d[0:frame_limit:skip_count] for d in demo_paths[from_demo:to_demo]]
+    print("Demo Length - Raw: {}, Processed {}".format(len(demo_paths[from_demo]), [len(demos[0])]))
+
+    # distorted_image = random_distort(train_set[0][0][0].detach().cpu().numpy() * 255) / 255
+
     d_set = ImagePoseFuturePoseDataSet(demos, joint_names, im_trans)
     d_loader = DeviceDataLoader(DataLoader(d_set, batch_size, shuffle=shuffled), device)
 
@@ -43,14 +49,14 @@ def load_constant_joint_vals(demos_root, constant_joint_names):
     return {n:p for n, p in zip(constant_joint_names, relevant_poses)}
     
 
-def load_pose_demos(demos_folder, image_glob, batch_size, joint_names, shuffled, device, from_demo=None, to_demo=None, frame_limit=None):
-    demo_paths = image_demo_paths(demos_folder, image_glob)
-    demos = [d[0:frame_limit] for d in demo_paths[from_demo:to_demo]]
+# def load_pose_demos(demos_folder, image_glob, batch_size, joint_names, shuffled, device, from_demo=None, to_demo=None, frame_limit=None):
+#     demo_paths = image_demo_paths(demos_folder, image_glob)
+#     demos = [d[0:frame_limit] for d in demo_paths[from_demo:to_demo]]
 
-    d_set = PoseControlDataset(demos, joint_names)
-    d_loader = DeviceDataLoader(DataLoader(d_set, batch_size, shuffle=shuffled), device)
+#     d_set = PoseControlDataset(demos, joint_names)
+#     d_loader = DeviceDataLoader(DataLoader(d_set, batch_size, shuffle=shuffled), device)
 
-    return d_set, d_loader
+#     return d_set, d_loader
 
 
 def save_dict_append(d, file_path):
@@ -62,6 +68,17 @@ def save_list_append(xs, file_path):
     with open(file_path, "a") as save_file:
         for x in xs:
             save_file.write("{}\n".format(x))
+
+def append_tensors_as_csv(nums, file_path, cols=None):
+    # Add a column reference at top if required
+    if not os.path.exists(file_path) and cols is not None:
+        with open(file_path, 'a') as save_file:
+            cols_csv = ",".join(cols)
+            save_file.write("{}\n".format(cols_csv))
+
+    csv_line = ",".join([str(x.item()) for x in nums])
+    with open(file_path, 'a') as save_file:
+        save_file.write("{}\n".format(csv_line))
 
 
 def save_list_nums(lines, file_path):
@@ -162,38 +179,40 @@ class ImagePoseControlDataset(Dataset):
 class ImagePoseFuturePoseDataSet(Dataset):
 
     def __init__(self, images_by_demo, arm_joint_names, im_transform=None):
+        # self.images_by_demo = images_by_demo
         self.images_by_demo = images_by_demo
         self.arm_joint_names = arm_joint_names
         self.im_transform = im_transform
-        self.predict_interval = 5
 
         # We don't want sampler to pick last x images of each demo
         # because we are predicting positions on current instance + x
-        self.demo_strides = list(zip(images_by_demo, strides(images_by_demo, -self.predict_interval)))
+        # self.skipped_demos = [d[::self.skip_count] for d in images_by_demo]
+
+        # print("Full lengths {}, Skipped Lengths: {}".format([len(d) for d in images_by_demo], [len(d) for d in self.skipped_demos]))
+        self.demo_strides = list(zip(self.images_by_demo, strides(self.images_by_demo, -1)))
+        print("Loading {} files".format(len(self)))
+        self.data_points = [self.load_data_point(i) for i in range(len(self))]
 
     def __len__(self):
-        return sum(len(demo) - self.predict_interval for demo in self.images_by_demo)
+        return sum(len(demo) - 1 for demo in self.images_by_demo)
 
-    
     def __getitem__(self, idx):
+        return self.data_points[idx]
+
+    def load_data_point(self, idx):
         demo, demo_stride = find_last(lambda ds: idx >= ds[1], self.demo_strides)
         img_id = idx - demo_stride
 
-        # TODO: Implement get_pose_next_pose
-        np_pose, np_next_pose = get_pose_next_pose(demo, img_id, self.arm_joint_names, self.predict_interval)
+        np_pose, np_next_pose = get_pose_next_pose(demo, img_id, self.arm_joint_names, 1)
 
         
         # Convert image format
         raw_img = cv2.imread(demo[img_id])[:, :, [2, 1, 0]] # BGR -> RGB Colour Indexing
+        raw_img = Image.fromarray(raw_img)
         if self.im_transform is None:
             transformed_im = raw_img
         else:
             transformed_im = self.im_transform(raw_img)
-
-        np_img = cv_to_nn_input(transformed_im)
-
-        # Numpy -> Torch =  (Height x Width x Colour) ->  (Colour x Height x Width)
-        img = torch.from_numpy(np_img.transpose(2, 0, 1)).to(dtype=torch.float)
 
         # Normalize joint angles by encoding with sin/cos
         wrapped_pose = wrap_pose(np_pose)
@@ -202,7 +221,31 @@ class ImagePoseFuturePoseDataSet(Dataset):
         wrapped_next_pose = wrap_pose(np_next_pose)
         next_pose = torch.from_numpy(wrapped_next_pose).to(dtype=torch.float)
 
-        return ((img, pose), next_pose) # {"raw_image":raw_img, "image": img, "pose": pose, "control": control}
+        return ((transformed_im, pose), next_pose) # {"raw_image":raw_img, "image": img, "pose": pose, "control": control}
+    
+    # def __getitem__(self, idx):
+    #     demo, demo_stride = find_last(lambda ds: idx >= ds[1], self.demo_strides)
+    #     img_id = idx - demo_stride
+
+    #     np_pose, np_next_pose = get_pose_next_pose(demo, img_id, self.arm_joint_names, 1)
+
+        
+    #     # Convert image format
+    #     raw_img = cv2.imread(demo[img_id])[:, :, [2, 1, 0]] # BGR -> RGB Colour Indexing
+    #     raw_img = Image.fromarray(raw_img)
+    #     if self.im_transform is None:
+    #         transformed_im = raw_img
+    #     else:
+    #         transformed_im = self.im_transform(raw_img)
+
+    #     # Normalize joint angles by encoding with sin/cos
+    #     wrapped_pose = wrap_pose(np_pose)
+    #     pose = torch.from_numpy(wrapped_pose).to(dtype=torch.float)
+
+    #     wrapped_next_pose = wrap_pose(np_next_pose)
+    #     next_pose = torch.from_numpy(wrapped_next_pose).to(dtype=torch.float)
+
+    #     return ((transformed_im, pose), next_pose) # {"raw_image":raw_img, "image": img, "pose": pose, "control": control}
 
 def wrap_pose(unbounded_rads):
     pi_bounded_rads = np.arctan2(np.sin(unbounded_rads), np.cos(unbounded_rads)) # bound between [-pi, pi]

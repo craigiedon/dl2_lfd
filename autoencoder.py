@@ -1,32 +1,42 @@
 import torch
+import numpy as np
 from torch import nn, optim
 import torch.nn.functional as F
 from torch.distributions.normal import Normal
 from helper_funcs.utils import load_json, temp_print, t_stamp
-from torchvision.transforms import Compose
-from helper_funcs.transforms import Crop, Resize
-from load_data import load_demos, show_torched_im, nn_input_to_imshow
+from torchvision.transforms import Compose, ColorJitter, Resize, ToTensor
+from helper_funcs.transforms import Crop
+from load_data import load_demos, show_torched_im, nn_input_to_imshow, append_tensors_as_csv
+from helper_funcs.utils_image import random_distort
 import matplotlib.pyplot as plt
 from os.path import join
 import os
+import pandas as pd
 
 
 # Make an encoder module
 class Encoder(nn.Module):
     def __init__(self, in_height, in_width, out_dim):
         super(Encoder, self).__init__()
-        out_channels_first = 64
+        out_channels_first = 16
         self.cn1 = nn.Conv2d(in_channels=3, out_channels=out_channels_first, kernel_size=4, stride=2, padding=1)
-        self.cn2 = nn.Conv2d(in_channels=out_channels_first, out_channels=out_channels_first // 2, kernel_size=4, stride=2, padding=1)
-        self.cn3 = nn.Conv2d(in_channels=out_channels_first // 2, out_channels=out_channels_first // 4, kernel_size=4, stride=2, padding=1)
+        self.cn2 = nn.Conv2d(in_channels=out_channels_first, out_channels=out_channels_first * 2, kernel_size=4, stride=2, padding=1)
+        self.cn3 = nn.Conv2d(in_channels=out_channels_first * 2, out_channels=out_channels_first * 4, kernel_size=4, stride=2, padding=1)
+        self.cn4 = nn.Conv2d(in_channels=out_channels_first * 4, out_channels=out_channels_first * 8, kernel_size=4, stride=2, padding=1)
+        self.cn5 = nn.Conv2d(in_channels=out_channels_first * 8, out_channels=out_channels_first * 16, kernel_size=4, stride=2, padding=1)
 
-        #TODO: Put in some batch norm?
-        o_height, o_width = out_size_cnns((in_height, in_width), [self.cn1, self.cn2, self.cn3])
-        flattened_dim = o_height * o_width * self.cn3.out_channels
+        self.bn1 = nn.BatchNorm2d(self.cn1.out_channels)
+        self.bn2 = nn.BatchNorm2d(self.cn2.out_channels)
+        self.bn3 = nn.BatchNorm2d(self.cn3.out_channels)
+        self.bn4 = nn.BatchNorm2d(self.cn4.out_channels)
+        self.bn5 = nn.BatchNorm2d(self.cn5.out_channels)
+
+        o_height, o_width = out_size_cnns((in_height, in_width), [self.cn1, self.cn2, self.cn3, self.cn4, self.cn5])
+        flattened_dim = o_height * o_width * self.cn5.out_channels
 
         self.c_out_h = o_height
         self.c_out_w = o_width
-        self.c_out_c = self.cn3.out_channels
+        self.c_out_c = self.cn5.out_channels
         
 
         self.means = nn.Linear(flattened_dim, out_dim)
@@ -35,9 +45,11 @@ class Encoder(nn.Module):
 
     def forward(self, img_batch_in):
         batch_size = img_batch_in.shape[0]
-        conv_out = F.relu(self.cn1(img_batch_in))
-        conv_out = F.relu(self.cn2(conv_out))
-        conv_out = F.relu(self.cn3(conv_out))
+        conv_out = F.leaky_relu(self.bn1(self.cn1(img_batch_in)), negative_slope=0.2)
+        conv_out = F.leaky_relu(self.bn2(self.cn2(conv_out)), negative_slope=0.2)
+        conv_out = F.leaky_relu(self.bn3(self.cn3(conv_out)), negative_slope=0.2)
+        conv_out = F.leaky_relu(self.bn4(self.cn4(conv_out)), negative_slope=0.2)
+        conv_out = F.leaky_relu(self.bn5(self.cn5(conv_out)), negative_slope=0.2)
 
         flattened_im = torch.flatten(conv_out, 1)
 
@@ -54,13 +66,13 @@ class Encoder(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, z_dim, enc_out_c, enc_out_h, enc_out_w):
+    def __init__(self, z_dim, enc_out_h, enc_out_w):
         super(Decoder, self).__init__()
         # The out features are enc_out_channel_dims, encoder_out_height, encoder_out_width
-        self.enc_out_h = enc_out_w
+        self.enc_out_h = enc_out_h
         self.enc_out_w = enc_out_w
 
-        self.initial_channels = 128
+        self.initial_channels = 128 * 16
 
         self.lin1 = nn.Linear(z_dim, self.initial_channels * 4)
 
@@ -71,35 +83,67 @@ class Decoder(nn.Module):
         self.ctn5 = nn.ConvTranspose2d(in_channels=self.initial_channels // 8, out_channels=self.initial_channels // 16, kernel_size=4, stride=2, padding=1)
         self.ctn6 = nn.ConvTranspose2d(in_channels=self.initial_channels // 16, out_channels=3, kernel_size=4, stride=2, padding=1)
 
+        self.bn1 = nn.BatchNorm2d(self.ctn1.out_channels)
+        self.bn2 = nn.BatchNorm2d(self.ctn2.out_channels)
+        self.bn3 = nn.BatchNorm2d(self.ctn3.out_channels)
+        self.bn4 = nn.BatchNorm2d(self.ctn4.out_channels)
+        self.bn5 = nn.BatchNorm2d(self.ctn5.out_channels)
+        self.bn6 = nn.BatchNorm2d(self.ctn6.out_channels)
+
 
     def forward(self, z_batch):
         flattened_h = self.lin1(z_batch)
         # print("Flattened shape", flattened_h.shape)
         reshaped_h = flattened_h.reshape((-1, self.initial_channels, 2, 2))
         # print(reshaped_h.shape)
-        ct_out = self.ctn1(reshaped_h)
-        ct_out = self.ctn2(ct_out)
-        ct_out = self.ctn3(ct_out)
-        ct_out = self.ctn4(ct_out)
-        ct_out = self.ctn5(ct_out)
-        ct_out = self.ctn6(ct_out)
+        ct_out = F.relu(self.bn1(self.ctn1(reshaped_h)))
+        ct_out = F.relu(self.bn2(self.ctn2(ct_out)))
+        ct_out = F.relu(self.bn3(self.ctn3(ct_out)))
+        ct_out = F.relu(self.bn4(self.ctn4(ct_out)))
+        ct_out = F.relu(self.bn5(self.ctn5(ct_out)))
+        ct_out = self.bn6(self.ctn6(ct_out))
 
         result = torch.sigmoid(ct_out)
 
         return result
 
+class FFNet(nn.Module):
+    def __init__(self, in_dims, hidden_dims, out_dims):
+        super(FFNet, self).__init__()
+        self.l1 = nn.Linear(in_dims, hidden_dims)
+        self.l2 = nn.Linear(hidden_dims, hidden_dims)
+        self.l3 = nn.Linear(hidden_dims, out_dims)
 
-class EncoderDecoder(nn.Module):
-    def __init__(self, in_height, in_width, z_dims):
-        super(EncoderDecoder, self).__init__()
+    def forward(self, in_batch):
+        result = F.relu(self.l1(in_batch))
+        result = F.relu(self.l2(result))
+        result = self.l3(result)
+        return result
+
+
+
+
+class EncodeDecodePredictor(nn.Module):
+    def __init__(self, in_height, in_width, z_dims, ff_h_dims, out_dims):
+        super(EncodeDecodePredictor, self).__init__()
         self.encoder = Encoder(in_height, in_width, z_dims)
-        self.decoder = Decoder(z_dims, self.encoder.c_out_c, self.encoder.c_out_h, self.encoder.c_out_w)
+        self.decoder = Decoder(z_dims, self.encoder.c_out_h, self.encoder.c_out_w)
+        self.ff_net = FFNet(z_dims, ff_h_dims, out_dims)
     
 
     def forward(self, im_batch):
         encoded_ims, mu, ln_var = self.encoder(im_batch)
         decoded = self.decoder(encoded_ims)
-        return decoded, mu, ln_var
+        prediction = self.ff_net(encoded_ims)
+        return prediction, decoded, mu, ln_var
+
+
+def full_loss(predicted_joints, target_joints, recon_im_batch, orig_im_batch, mu, log_var):
+    # Mean squared error of joints
+    pred_loss = F.mse_loss(predicted_joints, target_joints)
+    combined_vae_loss, recon_loss, kl_to_prior = vae_loss(recon_im_batch, orig_im_batch, mu, log_var)
+    full_loss = pred_loss + 1E-5 * combined_vae_loss
+    return full_loss, pred_loss, combined_vae_loss, recon_loss, kl_to_prior
 
 
 def vae_loss(recon_im_batch, orig_im_batch, mu, log_var):
@@ -123,13 +167,34 @@ def output_size(in_height, in_width, kernel_size, stride=1, padding=0):
     out_width = int((in_width - kernel_size + padding * 2) / stride) + 1
     return (out_height, out_width)
 
+def plot_csv(csv_path, save_path=None, show_fig=False):
+    df = pd.read_csv(csv_path, sep=",")
+    # print(training_df)
+    # df.plot(subplots=True)
+    for col in df.columns:
+        plt.plot(df[col], label=col)
+    # plt.plot(training_df.error, label="Results")
+    # # plt.plot(validation_df.error, label="Validation")
+    plt.xlabel("Epoch")
+    plt.ylabel("Losses")
+    plt.legend()
+    if save_path is not None:
+        plt.savefig(save_path)
+
+    if show_fig:
+        plt.show()
+
+    plt.close()
+
 
 exp_config = load_json("config/experiment_config.json")
 im_params = exp_config["image_config"]
 im_trans = Compose([
+    ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.05),
     Crop(im_params["crop_top"], im_params["crop_left"],
          im_params["crop_height"], im_params["crop_width"]),
-    Resize(im_params["resize_height"], im_params["resize_width"])])
+    Resize((im_params["resize_height"], im_params["resize_width"])),
+    ToTensor()])
 
 train_set, train_loader = load_demos(
     exp_config["demo_folder"],
@@ -140,47 +205,106 @@ train_set, train_loader = load_demos(
     True,
     torch.device("cuda"),
     from_demo=0,
-    to_demo=1)
+    to_demo=60,
+    skip_count=5)
 
+# for i in range(12):
+#     plt.subplot(3,4,i + 1)
+#     plt.imshow(nn_input_to_imshow(train_set[i][0][0]))
+# plt.show()
+
+validation_set, validation_loader = load_demos(
+    exp_config["demo_folder"],
+    im_params["file_glob"],
+    exp_config["batch_size"],
+    exp_config["nn_joint_names"],
+    im_trans,
+    False,
+    torch.device("cuda"),
+    from_demo=60,
+    to_demo=80,
+    skip_count=5)
 
 IM_HEIGHT = 128
 IM_WIDTH = 128
 Z_DIMS = 512
+HIDDEN_LAYER = 100
 EPOCHS = 300
-vae_model = EncoderDecoder(IM_HEIGHT, IM_WIDTH, Z_DIMS)
+print("Prediction Dims: {}".format(len(train_set[0][1])))
+
+vae_model = EncodeDecodePredictor(IM_HEIGHT, IM_WIDTH, Z_DIMS, HIDDEN_LAYER, len(train_set[0][1]))
 vae_model.to(torch.device("cuda"))
 
 optimizer = optim.Adam(vae_model.parameters())
-#TODO: Does this loss function need a "requires gradient" line anywhere?
-loss_criterion = vae_loss
-print(vae_model)
+loss_criterion = full_loss
+#print(vae_model)
 
 
 results_folder = "logs/vae-test-{}".format(t_stamp())
+decoder_preview_folder = join(results_folder, "decoder-preview")
 if not os.path.exists(results_folder):
     os.makedirs(results_folder)
+    os.makedirs(decoder_preview_folder)
+
+# df = pd.DataFrame(index=np.arange(0, EPOCHS), columns=["t-full", "t-recon", "t-kl", "v-full", "v-recon", "v-kl"])
+# print(df.columns)
 
 for epoch in range(EPOCHS):
     # print("Epoch: {}".format(epoch))
+    vae_model.train()
+    train_losses = []
     for i, in_batch in enumerate(train_loader):
 
-        temp_print("Batch {}/{}".format(i, len(train_loader)))
-        (img_ins, _), _ = in_batch
-        decoded_ims, mu, ln_var = vae_model(img_ins)
-        full_loss, recon_loss, kl_loss = loss_criterion(decoded_ims, img_ins, mu, ln_var)
+        temp_print("T Batch {}/{}".format(i, len(train_loader)))
+        (img_ins, _), target_joints = in_batch
+        predicted_joints, decoded_ims, mu, ln_var = vae_model(img_ins)
+        train_loss = loss_criterion(predicted_joints, target_joints, decoded_ims, img_ins, mu, ln_var)
+        train_losses.append(train_loss)
         optimizer.zero_grad()
-        full_loss.backward()
+        train_loss[0].backward()
         optimizer.step()
-        # print("Batch {}".format(i))
 
-        # print("Full Loss: {}, Recon: {}, KL-part: {}".format(full_loss, recon_loss, kl_loss))
+    
+    vae_model.eval()
+    val_losses = []
+    for i, in_batch in enumerate(validation_loader):
+        temp_print("V Batch {}/{}".format(i, len(validation_loader)))
+        with torch.no_grad():
+            (img_ins, _), target_joints = in_batch
+            predicted_joints, decoded_ims, mu, ln_var = vae_model(img_ins)
+            val_loss = loss_criterion(predicted_joints, target_joints, decoded_ims, img_ins, mu, ln_var)
+            val_losses.append(val_loss)
 
-    print("For Epoch {}, Full Loss: {}, Recon: {}, KL-part: {} ".format(epoch, full_loss, recon_loss, kl_loss))
-    # if epoch % 10 == 0:
-    _, (orig_ax, decoded_ax) = plt.subplots(1, 2)
-    orig_ax.imshow(nn_input_to_imshow(img_ins[0]))
-    decoded_ax.imshow(nn_input_to_imshow(decoded_ims[0].detach()))
-    plt.savefig(join(results_folder, "decodedIm-epoch-{}".format(epoch)))
-    ## Write function to decode images, display them etc. using cv2 (use daniel's code for this if there is some? If not should be not too hard)
+    t_loss_means = np.mean(train_losses, axis=0)
+    v_loss_means = np.mean(val_losses, axis=0)
+
+    # df.loc[epoch] = [train_full_loss.item(), train_recon_loss.item(), train_kl_loss.item(), val_full_loss.item(), val_recon_loss.item(), val_kl_loss.item()]
+    # print(df.loc[epoch])
+    print("{} T-Full: {}, T-MSE: {}, T-VAE: {} T-Recon: {}, T-KL: {}, V-Full {}, V-MSE {}, V-VAE: {}, V-Recon: {}, V-KL: {}"
+          .format(epoch, t_loss_means[0], t_loss_means[1], t_loss_means[2], t_loss_means[3], t_loss_means[4],
+                  v_loss_means[0], v_loss_means[1], v_loss_means[2], v_loss_means[3], v_loss_means[4]))
+    metrics = ["T-Full", "T-MSE", "T-VAE", "T-Recon", "T-KL",
+               "V-Full", "V-MSE", "V-VAE", "V-Recon", "V-KL"]
+    append_tensors_as_csv(np.concatenate((t_loss_means, v_loss_means)),
+    join(results_folder, "losses.csv"),
+    cols = metrics)
+    plot_csv(join(results_folder, "losses.csv"), join(results_folder, "losses.pdf"))
+
+    if epoch % 10 == 0:
+        torch.save(vae_model.state_dict(), join(results_folder, "learned_model_epoch_{}.pt".format(epoch)))
+
+    preview_ids = [0, len(validation_loader) // 2, len(validation_loader) - 1]
+    fig, axes = plt.subplots(len(preview_ids), 2)
+    for i, p_id in enumerate(preview_ids):
+        (preview_im, _), _ = validation_set[p_id]
+        with torch.no_grad():
+            decoded_preview = vae_model(preview_im.unsqueeze(0).to(torch.device("cuda")))[1].squeeze()
+            axes[i,0].imshow(nn_input_to_imshow(preview_im))
+            axes[i,1].imshow(nn_input_to_imshow(decoded_preview.detach()))
+
+            axes[i,0].axis('off')
+            axes[i,1].axis('off')
+    plt.savefig(join(decoder_preview_folder, "decodedIm-epoch-{}".format(epoch)), bbox_inches=0)
+    plt.close(fig)
 
 ## Implements skip count function, image contrasts augmentation etc.
