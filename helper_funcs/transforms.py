@@ -1,4 +1,4 @@
-from torchvision import Compose, Resize, ToTensor, ColorJitter
+from torchvision.transforms import Compose, Resize, ToTensor, ColorJitter
 
 class Crop(object):
     def __init__(self, top, left, height, width):
