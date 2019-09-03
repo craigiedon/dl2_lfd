@@ -198,15 +198,20 @@ class ImagePoseFuturePoseDataSet(Dataset):
         # Normalize joint angles by encoding with sin/cos
         wrapped_pose = wrap_pose(np_pose)
         pose = torch.from_numpy(wrapped_pose).to(dtype=torch.float)
+        # pose = torch.from_numpy(np_pose).to(dtype=torch.float)
 
         wrapped_next_pose = wrap_pose(np_next_pose)
         next_pose = torch.from_numpy(wrapped_next_pose).to(dtype=torch.float)
+        # next_pose = torch.from_numpy(np_next_pose).to(dtype=torch.float)
 
         return ((img, pose), next_pose) # {"raw_image":raw_img, "image": img, "pose": pose, "control": control}
 
 def wrap_pose(unbounded_rads):
     pi_bounded_rads = np.arctan2(np.sin(unbounded_rads), np.cos(unbounded_rads)) # bound between [-pi, pi]
     return (pi_bounded_rads + np.pi) / (np.pi * 2.0) # bound between [0, 1]
+
+def unnorm_pose(normed_rads):
+    return normed_rads * (np.pi * 2.0) - np.pi
 
 
 def get_pose_and_control(im_paths, idx, ordered_joints):

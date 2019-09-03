@@ -8,7 +8,10 @@ import cv2
 import geometry_msgs
 
 from model import load_model
-from load_data import cv_to_nn_input, nn_input_to_imshow, load_demos
+from load_data import cv_to_nn_input, nn_input_to_imshow, load_demos, unnorm_pose, wrap_pose
+from torchvision.transforms import Compose
+from helper_funcs.utils import load_json, byteify
+from helper_funcs.transforms import Crop, Resize
 
 # ROS
 import rospy # Ros Itself
@@ -23,20 +26,13 @@ import torch
 IMAGE_SIZE = 128
 
 
-def send_left_arm_goal(j_pos, arm_publisher):
-    joint_names = ['l_upper_arm_roll_joint',
-                   'l_shoulder_pan_joint',
-                   'l_shoulder_lift_joint',
-                   'l_forearm_roll_joint',
-                   'l_elbow_flex_joint',
-                   'l_wrist_flex_joint',
-                   'l_wrist_roll_joint']
+def send_arm_goal(j_pos, arm_publisher, joint_names):
 
     jtps = [JointTrajectoryPoint(
         positions=j_pos,
         velocities=[0.0] * len(j_pos),
         accelerations=[0.0] * len(j_pos),
-        time_from_start=rospy.Duration(0.5))]
+        time_from_start=rospy.Duration(1.0))]
 
     jt = JointTrajectory(joint_names=joint_names,points=jtps)
     jt.header.stamp = rospy.Time.now()
@@ -44,36 +40,51 @@ def send_left_arm_goal(j_pos, arm_publisher):
     arm_publisher.publish(jt)
 
 
-def act(last_state, model, arm_publisher, vel_dt):
+def act(last_state, model, arm_publisher, joint_names):
     if last_state.image is None or last_state.joint_pos is None:
         print('No image / position. Skipping')
         return
 
-    ## TODO: Find a way to stick this stuff on cuda
-    torch_im = torch.from_numpy(last_state.image.transpose(2, 0, 1)).to(dtype=torch.float)
-    ##torch_im = last_img.to(torch.device("cuda"))
-    torch_pos = torch.FloatTensor(last_state.joint_pos) # device="cuda")
+    with torch.no_grad():
+        torch_im = torch.from_numpy(last_state.image.transpose(2, 0, 1)).to(dtype=torch.float)
+        torch_pos = wrap_pose(torch.FloatTensor(last_state.joint_pos)) # device="cuda")
 
-    # cv2.imshow('Input', cv2.cvtColor(nn_input_to_imshow(torch_im), cv2.COLOR_RGB2BGR))
-    # cv2.waitKey(100)
+        cv2.imshow('Input', cv2.cvtColor(nn_input_to_imshow(torch_im), cv2.COLOR_RGB2BGR))
+        cv2.waitKey(100)
 
-    new_pos = (torch_pos - 0.1).tolist()
-    send_left_arm_goal(new_pos, arm_publisher)
-    """
-    output_vels = model(torch_im, last_pos).tolist()
-    print('output velocities', output_vels)
+        next_pos_normed = model(torch.unsqueeze(torch_im, 0), torch.unsqueeze(torch_pos, 0))[0]
+        next_pos = unnorm_pose(next_pos_normed).tolist()
 
-    new_pos = (torch_pos + output_vels * vel_dt).tolist()
+    send_arm_goal(next_pos, arm_publisher, joint_names)
 
-    send_left_arm_goal(new_pos, arm_publisher)
-    """
-
-def open_loop_act(last_id, data_set, arm_publisher):
+def open_loop_act(last_id, last_state, data_set, arm_publisher, joint_names):
     if last_id >= len(data_set):
         print("Gone through dataset, waiting here")
+        return
 
-    (pos, img), next_pos = data_set[i]
-    send_left_arm_goal(next_pos, arm_publisher))
+    if last_state.image is None or last_state.joint_pos is None:
+        print('No image / position. Skipping')
+        return
+
+    torch_im = torch.from_numpy(last_state.image.transpose(2, 0, 1)).to(dtype=torch.float)
+    cv2.imshow('Input', cv2.cvtColor(nn_input_to_imshow(torch_im), cv2.COLOR_RGB2BGR))
+    cv2.waitKey(100)
+
+
+    # (img, pos_normed), next_pos_normed = data_set[last_id]
+
+    # pos = unnorm_pose(pos_normed)
+    # next_pos = unnorm_pose(next_pos_normed)
+
+    # print("First data pos")
+    # print(pos)
+
+    (img, pos), next_pos = data_set[last_id]
+    data_pos_torch = torch.FloatTensor(pos)
+    print("Raw pos {}".format(data_pos_torch))
+
+
+    send_arm_goal(data_pos_torch, arm_publisher, joint_names)
 
 def setup_moveit_group(group_name):
     moveit_commander.roscpp_initialize(sys.argv)
@@ -122,33 +133,39 @@ def sanity_check():
     moveit_commander.roscpp_initialize(sys.argv)
     r = rospy.Rate(0.5)
 
+    exp_config = byteify(load_json("config/experiment_config.json"))
+
     pr2_left = setup_moveit_group("left_arm")
     pr2_right = setup_moveit_group("right_arm")
 
-    left_command = rospy.Publisher('/l_arm_controller/command', JointTrajectory, queue_size=1)
-
-    joint_names = ['l_upper_arm_roll_joint',
-                   'l_shoulder_pan_joint',
-                   'l_shoulder_lift_joint',
-                   'l_forearm_roll_joint',
-                   'l_elbow_flex_joint',
-                   'l_wrist_flex_joint',
-                   'l_wrist_roll_joint']
+    left_command = rospy.Publisher('/l_arm_controller/command', JointTrajectory)
+    right_command = rospy.Publisher('/r_arm_controller/command', JointTrajectory)
 
 
-    device = torch.device("cuda")
+    right_joints = [
+        "r_shoulder_pan_joint",
+        "r_shoulder_lift_joint",
+        "r_upper_arm_roll_joint",
+        "r_elbow_flex_joint",
+        "r_forearm_roll_joint",
+        "r_wrist_flex_joint",
+        "r_wrist_roll_joint"]
 
-    """
-    model = load_model(model_path, device, height, width, joint_names)
-    """
 
-    exp_config = load_json("config/experiment_config.json")
-    constant_param_map = load_constant_joint_vals(exp_config["demo_folder"], exp_config["constant_joint_names"])
+    device = torch.device("cpu")
     im_params = exp_config["image_config"]
     im_trans = Compose([
         Crop(im_params["crop_top"], im_params["crop_left"],
             im_params["crop_height"], im_params["crop_width"]),
         Resize(im_params["resize_height"], im_params["resize_width"])])
+
+    model = load_model("saved_models/gear_unconstrained_9.pt", device, im_params["resize_height"], im_params["resize_width"], exp_config["nn_joint_names"])
+
+    state_cache = RobotStateCache(exp_config["nn_joint_names"])
+    image_sub = rospy.Subscriber('/kinect2/qhd/image_color_rect', Image, state_cache.update_img)
+    joints_sub = rospy.Subscriber('/joint_states', JointState, state_cache.update_joint_pos)
+    print("Subscribed")
+
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -163,72 +180,78 @@ def sanity_check():
         from_demo=0,
         to_demo=1)
 
+    print("Starting pos: {}".format(unnorm_pose(train_set[0][0][1])))
 
-    ### Setup robot in initial pose using the moveit controllers
-    move_to_position_rotation(pr2_right, [0.576, -0.462, 0.910], [-1.765, 0.082, 1.170])
+    left_start = [ 0.2242,  0.3300,  1.4105, -0.8090,  0.1163, -0.9732,  0.2731]
+    right_start = [-0.7920,  0.5493, -1.1246, -1.0972, -0.8366, -1.0461, -0.0410]
 
-    right = pr2_right.get_current_pose().pose
-    left_pos = [right.position.x + 0.1, right.position.y + 0.49, right.position.z + 0.05]
-    left_rpy = [math.pi/2.0, 0.0, -math.pi/2.0]
-    success = move_to_position_rotation(pr2_left, left_pos, left_rpy)
+    send_arm_goal(left_start, left_command, exp_config["nn_joint_names"])
+    send_arm_goal(right_start, right_command, right_joints)
+
+
+
+    # ### Setup robot in initial pose using the moveit controllers
+    # right_success = move_to_position_rotation(pr2_right, [0.576, -0.462, 0.910], [-1.765, 0.082, 1.170])
+
+    # right = pr2_right.get_current_pose().pose
+    # left_pos = [right.position.x + 0.1, right.position.y + 0.49, right.position.z + 0.05]
+    # left_rpy = [math.pi/2.0, 0.0, -math.pi/2.0]
+
+
+    # print("Desired left: pos {}, rot {}".format(left_pos, left_rpy))
+    # left_success = move_to_position_rotation(pr2_left, left_pos, left_rpy)
+    # print("Left Success message: {}".format(left_success))
+    # print("Right Success message: {}".format(right_success))
 
 
     print('Robot policy Prepared.')
-    i = 0
+    model.eval()
     while not rospy.is_shutdown():
-        print('Check some things...')
-        open_loop_act(i, data_set, left_command)
-        i += 1
+        print("step")
+        act(state_cache, model, left_command, exp_config["nn_joint_names"])
         r.sleep()
 
     print('Done.')
 
-def main():
-    rospy.init_node('pr2_mover', anonymous=True)
-    moveit_commander.roscpp_initialize(sys.argv)
-    r = rospy.Rate(0.5)
+# def main():
+#     rospy.init_node('pr2_mover', anonymous=True)
+#     moveit_commander.roscpp_initialize(sys.argv)
+#     r = rospy.Rate(0.5)
 
-    pr2_left = setup_moveit_group("left_arm")
-    pr2_right = setup_moveit_group("right_arm")
+#     pr2_left = setup_moveit_group("left_arm")
+#     pr2_right = setup_moveit_group("right_arm")
 
-    left_command = rospy.Publisher('/l_arm_controller/command', JointTrajectory, queue_size=1)
-
-    joint_names = ['l_upper_arm_roll_joint',
-                   'l_shoulder_pan_joint',
-                   'l_shoulder_lift_joint',
-                   'l_forearm_roll_joint',
-                   'l_elbow_flex_joint',
-                   'l_wrist_flex_joint',
-                   'l_wrist_roll_joint']
-
-    state_cache = RobotStateCache(joint_names)
-    image_sub = rospy.Subscriber('/kinect2/qhd/image_color_rect', Image, state_cache.update_img)
-    joints_sub = rospy.Subscriber('/joint_states', JointState, state_cache.update_joint_pos)
-    print('Subscribed to data.')
-
-    """
-    device = torch.device("cuda")
-    model = load_model(model_path, device, height, width, joint_names)
-    """
+#     left_command = rospy.Publisher('/l_arm_controller/command', JointTrajectory, queue_size=1)
 
 
-    ### Setup robot in initial pose using the moveit controllers
-    move_to_position_rotation(pr2_right, [0.576, -0.462, 0.910], [-1.765, 0.082, 1.170])
+#     state_cache = RobotStateCache(joint_names)
+#     image_sub = rospy.Subscriber('/kinect2/qhd/image_color_rect', Image, state_cache.update_img)
+#     joints_sub = rospy.Subscriber('/joint_states', JointState, state_cache.update_joint_pos)
+#     print('Subscribed to data.')
 
-    right = pr2_right.get_current_pose().pose
-    left_pos = [right.position.x + 0.1, right.position.y + 0.49, right.position.z + 0.05]
-    left_rpy = [math.pi/2.0, 0.0, -math.pi/2.0]
-    success = move_to_position_rotation(pr2_left, left_pos, left_rpy)
+#     """
+#     device = torch.device("cuda")
+#     model = load_model(model_path, device, height, width, joint_names)
+#     """
 
 
-    print('Robot policy Prepared.')
-    while not rospy.is_shutdown():
-        print('Check some things...')
-        act(state_cache, None, left_command, 0.05)
-        r.sleep()
+#     ### Setup robot in initial pose using the moveit controllers
+#     move_to_position_rotation(pr2_right, [0.576, -0.462, 0.910], [-1.765, 0.082, 1.170])
 
-    print('Done.')
+#     right = pr2_right.get_current_pose().pose
+#     left_pos = [right.position.x + 0.1, right.position.y + 0.49, right.position.z + 0.05]
+#     left_rpy = [math.pi/2.0, 0.0, -math.pi/2.0]
+#     success = move_to_position_rotation(pr2_left, left_pos, left_rpy)
+
+
+#     print('Robot policy Prepared.')
+#     while not rospy.is_shutdown():
+#         print('Check some things...')
+#         act(state_cache, None, left_command, 0.05)
+#         r.sleep()
+
+#     print('Done.')
 
 
 if __name__ == '__main__':
-    main()
+    sanity_check()

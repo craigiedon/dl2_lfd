@@ -10,10 +10,16 @@ def t_stamp():
     return datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
 
 
-def temp_print(s):
-    print(s, end='\r', flush=True)
-    # print("Not implemented tempPrint for python2")
-
+def byteify(input):
+    if isinstance(input, dict):
+        return {byteify(key): byteify(value)
+                for key, value in input.iteritems()}
+    elif isinstance(input, list):
+        return [byteify(element) for element in input]
+    elif isinstance(input, unicode):
+        return input.encode('utf-8')
+    else:
+        return input
 
 def zip_chunks(tensor, num_chunks, dim=0):
     return torch.stack(torch.chunk(tensor, num_chunks, dim), dim).transpose(dim,dim+1)
