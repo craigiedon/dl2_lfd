@@ -4,8 +4,7 @@ from torch import nn, optim
 import torch.nn.functional as F
 from torch.distributions.normal import Normal
 from helper_funcs.utils import load_json, temp_print, t_stamp
-from torchvision.transforms import Compose, ColorJitter, Resize, ToTensor
-from helper_funcs.transforms import Crop
+from helper_funcs.transforms import get_trans
 from load_data import load_demos, show_torched_im, nn_input_to_imshow, append_tensors_as_csv
 from helper_funcs.utils_image import random_distort
 import matplotlib.pyplot as plt
@@ -198,12 +197,7 @@ def plot_csv(csv_path, save_path=None, show_fig=False, col_subset=None):
 
 exp_config = load_json("config/experiment_config.json")
 im_params = exp_config["image_config"]
-im_trans = Compose([
-    ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.05),
-    Crop(im_params["crop_top"], im_params["crop_left"],
-         im_params["crop_height"], im_params["crop_width"]),
-    Resize((im_params["resize_height"], im_params["resize_width"])),
-    ToTensor()])
+im_trans = get_trans(im_params, distorted=True)
 
 train_set, train_loader = load_demos(
     exp_config["demo_folder"],

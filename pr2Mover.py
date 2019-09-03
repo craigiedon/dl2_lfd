@@ -11,7 +11,7 @@ from model import load_model
 from load_data import cv_to_nn_input, nn_input_to_imshow, load_demos, unnorm_pose, wrap_pose
 from torchvision.transforms import Compose
 from helper_funcs.utils import load_json, byteify
-from helper_funcs.transforms import Crop, Resize
+from helper_funcs.transforms import get_trans
 
 # ROS
 import rospy # Ros Itself
@@ -129,6 +129,11 @@ class RobotStateCache(object):
 
 
 def sanity_check():
+    if len(sys.argv) != 2:
+        print("Usage: python pr2Mover.py <model_path>")
+        sys.exit()
+
+    model_path = sys.argv[1]
     rospy.init_node('pr2_mover', anonymous=True)
     moveit_commander.roscpp_initialize(sys.argv)
     r = rospy.Rate(0.5)
@@ -154,12 +159,8 @@ def sanity_check():
 
     device = torch.device("cpu")
     im_params = exp_config["image_config"]
-    im_trans = Compose([
-        Crop(im_params["crop_top"], im_params["crop_left"],
-            im_params["crop_height"], im_params["crop_width"]),
-        Resize(im_params["resize_height"], im_params["resize_width"])])
-
-    model = load_model("saved_models/gear_unconstrained_9.pt", device, im_params["resize_height"], im_params["resize_width"], exp_config["nn_joint_names"])
+    im_trans = get_trans(im_params)
+    model = load_model(model_path, device, im_params["resize_height"], im_params["resize_width"], exp_config["nn_joint_names"])
 
     state_cache = RobotStateCache(exp_config["nn_joint_names"])
     image_sub = rospy.Subscriber('/kinect2/qhd/image_color_rect', Image, state_cache.update_img)
@@ -169,18 +170,18 @@ def sanity_check():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    train_set, train_loader = load_demos(
-        exp_config["demo_folder"],
-        im_params["file_glob"],
-        exp_config["batch_size"],
-        exp_config["nn_joint_names"],
-        im_trans,
-        False,
-        device,
-        from_demo=0,
-        to_demo=1)
+    # train_set, _ = load_demos(
+    #     exp_config["demo_folder"],
+    #     im_params["file_glob"],
+    #     exp_config["batch_size"],
+    #     exp_config["nn_joint_names"],
+    #     im_trans,
+    #     False,
+    #     device,
+    #     from_demo=0,
+    #     to_demo=1)
 
-    print("Starting pos: {}".format(unnorm_pose(train_set[0][0][1])))
+    # print("Starting pos: {}".format(unnorm_pose(train_set[0][0][1])))
 
     left_start = [ 0.2242,  0.3300,  1.4105, -0.8090,  0.1163, -0.9732,  0.2731]
     right_start = [-0.7920,  0.5493, -1.1246, -1.0972, -0.8366, -1.0461, -0.0410]
