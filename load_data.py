@@ -8,7 +8,6 @@ import json
 import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
 from helper_funcs.utils import find_last
-from helper_funcs.utils_image import random_distort
 from glob import glob
 from PIL import Image
 
@@ -28,7 +27,6 @@ def load_demos(demos_folder, image_glob, batch_size, joint_names,
     demos = [d[0:frame_limit:skip_count] for d in demo_paths[from_demo:to_demo]]
     print("Demo Length - Raw: {}, Processed {}".format(len(demo_paths[from_demo]), [len(demos[0])]))
 
-    # distorted_image = random_distort(train_set[0][0][0].detach().cpu().numpy() * 255) / 255
 
     d_set = ImagePoseFuturePoseDataSet(demos, joint_names, im_trans)
     d_loader = DeviceDataLoader(DataLoader(d_set, batch_size, shuffle=shuffled), device)
