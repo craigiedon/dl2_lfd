@@ -24,6 +24,9 @@ def byteify(input):
 def zip_chunks(tensor, num_chunks, dim=0):
     return torch.stack(torch.chunk(tensor, num_chunks, dim), dim).transpose(dim,dim+1)
 
+def temp_print(s):
+    return
+
 
 def load_json(file_path):
     with open(file_path, 'r') as fp:

@@ -6,7 +6,6 @@ from torch.distributions.normal import Normal
 from helper_funcs.utils import load_json, temp_print, t_stamp
 from helper_funcs.transforms import get_trans
 from load_data import load_demos, show_torched_im, nn_input_to_imshow, append_tensors_as_csv
-from helper_funcs.utils_image import random_distort
 import matplotlib.pyplot as plt
 from os.path import join
 import os
@@ -173,7 +172,7 @@ def plot_csv(csv_path, save_path=None, show_fig=False, col_subset=None):
     # print(training_df)
     # df.plot(subplots=True)
 
-    if col_subset=None:
+    if col_subset == None:
         display_cols = df.columns
     else:
         display_cols = col_subset
@@ -194,120 +193,118 @@ def plot_csv(csv_path, save_path=None, show_fig=False, col_subset=None):
 
     plt.close()
 
+if __name__ == "__main__":
+    exp_config = load_json("config/experiment_config.json")
+    im_params = exp_config["image_config"]
+    im_trans = get_trans(im_params, distorted=True)
 
-exp_config = load_json("config/experiment_config.json")
-im_params = exp_config["image_config"]
-im_trans = get_trans(im_params, distorted=True)
+    train_set, train_loader = load_demos(
+        exp_config["demo_folder"],
+        im_params["file_glob"],
+        exp_config["batch_size"],
+        exp_config["nn_joint_names"],
+        im_trans,
+        True,
+        torch.device("cuda"),
+        from_demo=0,
+        to_demo=60,
+        skip_count=5)
 
-train_set, train_loader = load_demos(
-    exp_config["demo_folder"],
-    im_params["file_glob"],
-    exp_config["batch_size"],
-    exp_config["nn_joint_names"],
-    im_trans,
-    True,
-    torch.device("cuda"),
-    from_demo=0,
-    to_demo=60,
-    skip_count=5)
+    # for i in range(12):
+    #     plt.subplot(3,4,i + 1)
+    #     plt.imshow(nn_input_to_imshow(train_set[i][0][0]))
+    # plt.show()
 
-# for i in range(12):
-#     plt.subplot(3,4,i + 1)
-#     plt.imshow(nn_input_to_imshow(train_set[i][0][0]))
-# plt.show()
+    validation_set, validation_loader = load_demos(
+        exp_config["demo_folder"],
+        im_params["file_glob"],
+        exp_config["batch_size"],
+        exp_config["nn_joint_names"],
+        im_trans,
+        False,
+        torch.device("cuda"),
+        from_demo=60,
+        to_demo=80,
+        skip_count=5)
 
-validation_set, validation_loader = load_demos(
-    exp_config["demo_folder"],
-    im_params["file_glob"],
-    exp_config["batch_size"],
-    exp_config["nn_joint_names"],
-    im_trans,
-    False,
-    torch.device("cuda"),
-    from_demo=60,
-    to_demo=80,
-    skip_count=5)
+    IM_HEIGHT = 128
+    IM_WIDTH = 128
+    Z_DIMS = 512
+    HIDDEN_LAYER = 100
+    EPOCHS = 300
+    print("Prediction Dims: {}".format(len(train_set[0][1])))
 
-IM_HEIGHT = 128
-IM_WIDTH = 128
-Z_DIMS = 512
-HIDDEN_LAYER = 100
-EPOCHS = 300
-print("Prediction Dims: {}".format(len(train_set[0][1])))
+    vae_model = EncodeDecodePredictor(IM_HEIGHT, IM_WIDTH, Z_DIMS, HIDDEN_LAYER, len(train_set[0][1]))
+    vae_model.to(torch.device("cuda"))
 
-vae_model = EncodeDecodePredictor(IM_HEIGHT, IM_WIDTH, Z_DIMS, HIDDEN_LAYER, len(train_set[0][1]))
-vae_model.to(torch.device("cuda"))
-
-optimizer = optim.Adam(vae_model.parameters())
-loss_criterion = full_loss
-#print(vae_model)
+    optimizer = optim.Adam(vae_model.parameters())
+    loss_criterion = full_loss
+    #print(vae_model)
 
 
-results_folder = "logs/vae-test-{}".format(t_stamp())
-decoder_preview_folder = join(results_folder, "decoder-preview")
-if not os.path.exists(results_folder):
-    os.makedirs(results_folder)
-    os.makedirs(decoder_preview_folder)
+    results_folder = "logs/vae-test-{}".format(t_stamp())
+    decoder_preview_folder = join(results_folder, "decoder-preview")
+    if not os.path.exists(results_folder):
+        os.makedirs(results_folder)
+        os.makedirs(decoder_preview_folder)
 
-# df = pd.DataFrame(index=np.arange(0, EPOCHS), columns=["t-full", "t-recon", "t-kl", "v-full", "v-recon", "v-kl"])
-# print(df.columns)
+    # df = pd.DataFrame(index=np.arange(0, EPOCHS), columns=["t-full", "t-recon", "t-kl", "v-full", "v-recon", "v-kl"])
+    # print(df.columns)
 
-for epoch in range(EPOCHS):
-    # print("Epoch: {}".format(epoch))
-    vae_model.train()
-    train_losses = []
-    for i, in_batch in enumerate(train_loader):
+    for epoch in range(EPOCHS):
+        # print("Epoch: {}".format(epoch))
+        vae_model.train()
+        train_losses = []
+        for i, in_batch in enumerate(train_loader):
 
-        temp_print("T Batch {}/{}".format(i, len(train_loader)))
-        (img_ins, _), target_joints = in_batch
-        predicted_joints, decoded_ims, mu, ln_var = vae_model(img_ins)
-        train_loss = loss_criterion(predicted_joints, target_joints, decoded_ims, img_ins, mu, ln_var)
-        train_losses.append(train_loss)
-        optimizer.zero_grad()
-        train_loss[0].backward()
-        optimizer.step()
-
-    
-    vae_model.eval()
-    val_losses = []
-    for i, in_batch in enumerate(validation_loader):
-        temp_print("V Batch {}/{}".format(i, len(validation_loader)))
-        with torch.no_grad():
+            temp_print("T Batch {}/{}".format(i, len(train_loader)))
             (img_ins, _), target_joints = in_batch
             predicted_joints, decoded_ims, mu, ln_var = vae_model(img_ins)
-            val_loss = loss_criterion(predicted_joints, target_joints, decoded_ims, img_ins, mu, ln_var)
-            val_losses.append(val_loss)
+            train_loss = loss_criterion(predicted_joints, target_joints, decoded_ims, img_ins, mu, ln_var)
+            train_losses.append(train_loss)
+            optimizer.zero_grad()
+            train_loss[0].backward()
+            optimizer.step()
 
-    t_loss_means = np.mean(train_losses, axis=0)
-    v_loss_means = np.mean(val_losses, axis=0)
+        
+        vae_model.eval()
+        val_losses = []
+        for i, in_batch in enumerate(validation_loader):
+            temp_print("V Batch {}/{}".format(i, len(validation_loader)))
+            with torch.no_grad():
+                (img_ins, _), target_joints = in_batch
+                predicted_joints, decoded_ims, mu, ln_var = vae_model(img_ins)
+                val_loss = loss_criterion(predicted_joints, target_joints, decoded_ims, img_ins, mu, ln_var)
+                val_losses.append(val_loss)
 
-    # df.loc[epoch] = [train_full_loss.item(), train_recon_loss.item(), train_kl_loss.item(), val_full_loss.item(), val_recon_loss.item(), val_kl_loss.item()]
-    # print(df.loc[epoch])
-    print("{} T-Full: {}, T-MSE: {}, T-VAE: {} T-Recon: {}, T-KL: {}, V-Full {}, V-MSE {}, V-VAE: {}, V-Recon: {}, V-KL: {}"
-          .format(epoch, t_loss_means[0], t_loss_means[1], t_loss_means[2], t_loss_means[3], t_loss_means[4],
-                  v_loss_means[0], v_loss_means[1], v_loss_means[2], v_loss_means[3], v_loss_means[4]))
-    metrics = ["T-Full", "T-MSE", "T-VAE", "T-Recon", "T-KL",
-               "V-Full", "V-MSE", "V-VAE", "V-Recon", "V-KL"]
-    append_tensors_as_csv(np.concatenate((t_loss_means, v_loss_means)),
-    join(results_folder, "losses.csv"),
-    cols = metrics)
-    plot_csv(join(results_folder, "losses.csv"), join(results_folder, "losses.pdf"))
+        t_loss_means = np.mean(train_losses, axis=0)
+        v_loss_means = np.mean(val_losses, axis=0)
 
-    if epoch % 10 == 0:
-        torch.save(vae_model.state_dict(), join(results_folder, "learned_model_epoch_{}.pt".format(epoch)))
+        # df.loc[epoch] = [train_full_loss.item(), train_recon_loss.item(), train_kl_loss.item(), val_full_loss.item(), val_recon_loss.item(), val_kl_loss.item()]
+        # print(df.loc[epoch])
+        print("{} T-Full: {}, T-MSE: {}, T-VAE: {} T-Recon: {}, T-KL: {}, V-Full {}, V-MSE {}, V-VAE: {}, V-Recon: {}, V-KL: {}"
+            .format(epoch, t_loss_means[0], t_loss_means[1], t_loss_means[2], t_loss_means[3], t_loss_means[4],
+                    v_loss_means[0], v_loss_means[1], v_loss_means[2], v_loss_means[3], v_loss_means[4]))
+        metrics = ["T-Full", "T-MSE", "T-VAE", "T-Recon", "T-KL",
+                "V-Full", "V-MSE", "V-VAE", "V-Recon", "V-KL"]
+        append_tensors_as_csv(np.concatenate((t_loss_means, v_loss_means)),
+        join(results_folder, "losses.csv"),
+        cols = metrics)
+        plot_csv(join(results_folder, "losses.csv"), join(results_folder, "losses.pdf"))
 
-    preview_ids = [0, len(validation_loader) // 2, len(validation_loader) - 1]
-    fig, axes = plt.subplots(len(preview_ids), 2)
-    for i, p_id in enumerate(preview_ids):
-        (preview_im, _), _ = validation_set[p_id]
-        with torch.no_grad():
-            decoded_preview = vae_model(preview_im.unsqueeze(0).to(torch.device("cuda")))[1].squeeze()
-            axes[i,0].imshow(nn_input_to_imshow(preview_im))
-            axes[i,1].imshow(nn_input_to_imshow(decoded_preview.detach()))
+        if epoch % 10 == 0:
+            torch.save(vae_model.state_dict(), join(results_folder, "learned_model_epoch_{}.pt".format(epoch)))
 
-            axes[i,0].axis('off')
-            axes[i,1].axis('off')
-    plt.savefig(join(decoder_preview_folder, "decodedIm-epoch-{}".format(epoch)), bbox_inches=0)
-    plt.close(fig)
+        preview_ids = [0, len(validation_loader) // 2, len(validation_loader) - 1]
+        fig, axes = plt.subplots(len(preview_ids), 2)
+        for i, p_id in enumerate(preview_ids):
+            (preview_im, _), _ = validation_set[p_id]
+            with torch.no_grad():
+                decoded_preview = vae_model(preview_im.unsqueeze(0).to(torch.device("cuda")))[1].squeeze()
+                axes[i,0].imshow(nn_input_to_imshow(preview_im))
+                axes[i,1].imshow(nn_input_to_imshow(decoded_preview.detach()))
 
-## Implements skip count function, image contrasts augmentation etc.
+                axes[i,0].axis('off')
+                axes[i,1].axis('off')
+        plt.savefig(join(decoder_preview_folder, "decodedIm-epoch-{}".format(epoch)), bbox_inches=0)
+        plt.close(fig)

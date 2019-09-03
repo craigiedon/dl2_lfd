@@ -12,6 +12,7 @@ from load_data import cv_to_nn_input, nn_input_to_imshow, load_demos, unnorm_pos
 from torchvision.transforms import Compose
 from helper_funcs.utils import load_json, byteify
 from helper_funcs.transforms import get_trans
+from autoencoder import EncodeDecodePredictor
 
 # ROS
 import rospy # Ros Itself
@@ -32,7 +33,7 @@ def send_arm_goal(j_pos, arm_publisher, joint_names):
         positions=j_pos,
         velocities=[0.0] * len(j_pos),
         accelerations=[0.0] * len(j_pos),
-        time_from_start=rospy.Duration(1.0))]
+        time_from_start=rospy.Duration(1.5))]
 
     jt = JointTrajectory(joint_names=joint_names,points=jtps)
     jt.header.stamp = rospy.Time.now()
@@ -52,8 +53,17 @@ def act(last_state, model, arm_publisher, joint_names):
         cv2.imshow('Input', cv2.cvtColor(nn_input_to_imshow(torch_im), cv2.COLOR_RGB2BGR))
         cv2.waitKey(100)
 
-        next_pos_normed = model(torch.unsqueeze(torch_im, 0), torch.unsqueeze(torch_pos, 0))[0]
+        next_pos_normed = model(torch.unsqueeze(torch_im, 0))[0].squeeze()
         next_pos = unnorm_pose(next_pos_normed).tolist()
+
+        # print("Joint Names: {}".format(joint_names))
+        # print("Curret Pos: {}".format(torch_pos))
+
+        print("Current Pos Raw: {}".format(last_state.joint_pos))
+        print("Current Pos Norm-Unnormed {}".format(unnorm_pose(torch_pos)))
+
+        # print("Next Pos Normed: {}".format(next_pos_normed))
+        # print("Next Pos Prediction: {}".format(next_pos))
 
     send_arm_goal(next_pos, arm_publisher, joint_names)
 
@@ -160,7 +170,11 @@ def sanity_check():
     device = torch.device("cpu")
     im_params = exp_config["image_config"]
     im_trans = get_trans(im_params)
-    model = load_model(model_path, device, im_params["resize_height"], im_params["resize_width"], exp_config["nn_joint_names"])
+
+
+    model = EncodeDecodePredictor(im_params["resize_height"], im_params["resize_width"], 512, 100, len(exp_config["nn_joint_names"]))
+    model.load_state_dict(torch.load(model_path, map_location=device))
+    model.to(device)
 
     state_cache = RobotStateCache(exp_config["nn_joint_names"])
     image_sub = rospy.Subscriber('/kinect2/qhd/image_color_rect', Image, state_cache.update_img)
@@ -168,7 +182,6 @@ def sanity_check():
     print("Subscribed")
 
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # train_set, _ = load_demos(
     #     exp_config["demo_folder"],
@@ -213,46 +226,6 @@ def sanity_check():
         r.sleep()
 
     print('Done.')
-
-# def main():
-#     rospy.init_node('pr2_mover', anonymous=True)
-#     moveit_commander.roscpp_initialize(sys.argv)
-#     r = rospy.Rate(0.5)
-
-#     pr2_left = setup_moveit_group("left_arm")
-#     pr2_right = setup_moveit_group("right_arm")
-
-#     left_command = rospy.Publisher('/l_arm_controller/command', JointTrajectory, queue_size=1)
-
-
-#     state_cache = RobotStateCache(joint_names)
-#     image_sub = rospy.Subscriber('/kinect2/qhd/image_color_rect', Image, state_cache.update_img)
-#     joints_sub = rospy.Subscriber('/joint_states', JointState, state_cache.update_joint_pos)
-#     print('Subscribed to data.')
-
-#     """
-#     device = torch.device("cuda")
-#     model = load_model(model_path, device, height, width, joint_names)
-#     """
-
-
-#     ### Setup robot in initial pose using the moveit controllers
-#     move_to_position_rotation(pr2_right, [0.576, -0.462, 0.910], [-1.765, 0.082, 1.170])
-
-#     right = pr2_right.get_current_pose().pose
-#     left_pos = [right.position.x + 0.1, right.position.y + 0.49, right.position.z + 0.05]
-#     left_rpy = [math.pi/2.0, 0.0, -math.pi/2.0]
-#     success = move_to_position_rotation(pr2_left, left_pos, left_rpy)
-
-
-#     print('Robot policy Prepared.')
-#     while not rospy.is_shutdown():
-#         print('Check some things...')
-#         act(state_cache, None, left_command, 0.05)
-#         r.sleep()
-
-#     print('Done.')
-
 
 if __name__ == '__main__':
     sanity_check()
