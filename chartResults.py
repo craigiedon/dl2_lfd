@@ -11,7 +11,7 @@ import torch
 from helper_funcs.utils import zip_chunks, load_json, load_json_lines
 
 from torchvision.transforms import Compose
-from helper_funcs.transforms import Crop, Resize
+from helper_funcs.transforms import Crop 
 
 """
 def chart_train_validation_error(train_results_path, validation_results_path):
@@ -25,6 +25,28 @@ def chart_train_validation_error(train_results_path, validation_results_path):
     plt.legend()
     plt.show()
 """
+
+def plot_vae_metrics(csv_path, save_path=None, show_fig=False):
+    df = pd.read_csv(csv_path, sep=",")
+
+
+    subplots = [["T-Full", "V-Full"], ["T-MSE", "V-MSE"], ["T-VAE", "V-VAE"], ["T-Recon", "V-Recon"], ["T-KL", "V-KL"]]
+    for i, cols in enumerate(subplots):
+        plt.subplot(3,2,i + 1)
+        for col in cols:
+            plt.plot(df[col], label=col)
+        plt.xlabel("Epoch")
+        plt.ylabel("Losses")
+        plt.legend()
+
+
+    if save_path is not None:
+        plt.savefig(save_path)
+    
+    if show_fig:
+        plt.show()
+    
+    plt.close()
 
 def chart_error_batches(results_path, group_every=1):
     training_df = pd.read_csv(results_path, sep=" ", header=None, names=["error"])

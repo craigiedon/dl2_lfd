@@ -167,12 +167,21 @@ def output_size(in_height, in_width, kernel_size, stride=1, padding=0):
     out_width = int((in_width - kernel_size + padding * 2) / stride) + 1
     return (out_height, out_width)
 
-def plot_csv(csv_path, save_path=None, show_fig=False):
+    
+
+def plot_csv(csv_path, save_path=None, show_fig=False, col_subset=None):
     df = pd.read_csv(csv_path, sep=",")
     # print(training_df)
     # df.plot(subplots=True)
-    for col in df.columns:
+
+    if col_subset=None:
+        display_cols = df.columns
+    else:
+        display_cols = col_subset
+
+    for col in display_cols:
         plt.plot(df[col], label=col)
+
     # plt.plot(training_df.error, label="Results")
     # # plt.plot(validation_df.error, label="Validation")
     plt.xlabel("Epoch")
