@@ -115,6 +115,9 @@ def train(model, train_loader, validation_loader, epochs, constraint, args, save
         print("Validation: {}".format(avg_loss_validation))
         print()
 
+        if epoch % 5 == 0:
+            torch.save(full_model.state_dict(), join(save_path, "e2e_control_e{}.pt".format(epoch)))
+
     torch.save(full_model.state_dict(), join(save_path, "e2e_control_full.pt"))
     print("Finished Training")
     return model
@@ -150,7 +153,7 @@ train_set, train_loader = load_demos(
     True,
     device,
     from_demo=0,
-    to_demo=60)
+    to_demo=90)
 
 validation_set, validation_loader = load_demos(
     exp_config["demo_folder"],
@@ -160,8 +163,8 @@ validation_set, validation_loader = load_demos(
     im_trans,
     False,
     device,
-    from_demo=60,
-    to_demo=80)
+    from_demo=90,
+    to_demo=100)
 
 
 """
