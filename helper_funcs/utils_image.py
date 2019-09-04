@@ -16,15 +16,9 @@ def random_distort(
     * contrast: Multiplying the intensity of the image by a random scale.
     * saturation: Multiplying the saturation of the image by a random scale.
     * hue: Adding a random offset to the hue of the image randomly.
-    This data augmentation is used in training of
-    Single Shot Multibox Detector [#]_.
-    Note that this function requires :mod:`cv2`.
-    .. [#] Wei Liu, Dragomir Anguelov, Dumitru Erhan, Christian Szegedy,
-       Scott Reed, Cheng-Yang Fu, Alexander C. Berg.
-       SSD: Single Shot MultiBox Detector. ECCV 2016.
     Args:
         img (~numpy.ndarray): An image array to be augmented. This is in
-            HWC and RGB format.
+            HWC and BGR format.
         brightness_delta (float): The offset for saturation will be
             drawn from :math:`[-brightness\_delta, brightness\_delta]`.
             The default value is :obj:`32`.
@@ -42,12 +36,12 @@ def random_distort(
             drawn from :math:`[-hue\_delta, hue\_delta]`.
             The default value is :obj:`18`.
     Returns:
-        An image in HWC and RGB format.
+        An image in HWC and BGR format.
     """
     import cv2
 
-    # cv_img = img[::-1].astype(np.uint8)
-    cv_img = img[::-1].transpose((1, 2, 0)).astype(np.uint8)
+    cv_img = img
+    # cv_img = img[::-1].transpose((1, 2, 0)).astype(np.uint8)
 
     def blur(img, blur_low, blur_high):
         # blur image by a sigma of [blur_low, blur_high]
@@ -113,4 +107,5 @@ def random_distort(
         cv_img = hue(cv_img, hue_delta)
         cv_img = contrast(cv_img, contrast_low, contrast_high)
 
-    return cv_img.astype(np.float32).transpose((2, 0, 1))[::-1]
+    return cv_img
+    

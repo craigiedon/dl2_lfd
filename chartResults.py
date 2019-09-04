@@ -26,6 +26,32 @@ def chart_train_validation_error(train_results_path, validation_results_path):
     plt.show()
 """
 
+def plot_csv(csv_path, save_path=None, show_fig=False, col_subset=None):
+    df = pd.read_csv(csv_path, sep=",")
+    # print(training_df)
+    # df.plot(subplots=True)
+
+    if col_subset == None:
+        display_cols = df.columns
+    else:
+        display_cols = col_subset
+
+    for col in display_cols:
+        plt.plot(df[col], label=col)
+
+    # plt.plot(training_df.error, label="Results")
+    # # plt.plot(validation_df.error, label="Validation")
+    plt.xlabel("Epoch")
+    plt.ylabel("Losses")
+    plt.legend()
+    if save_path is not None:
+        plt.savefig(save_path)
+
+    if show_fig:
+        plt.show()
+
+    plt.close()
+
 def plot_vae_metrics(csv_path, save_path=None, show_fig=False):
     df = pd.read_csv(csv_path, sep=",")
 

@@ -25,7 +25,7 @@ def zip_chunks(tensor, num_chunks, dim=0):
     return torch.stack(torch.chunk(tensor, num_chunks, dim), dim).transpose(dim,dim+1)
 
 def temp_print(s):
-    return
+    print(s, end='\r', flush=True)
 
 
 def load_json(file_path):

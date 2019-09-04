@@ -124,43 +124,54 @@ class ImageAndJointsNet(nn.Module):
         return output
 
 
-"""
 class ImageOnlyNet(nn.Module):
     def __init__(self, image_height, image_width, joint_dim):
         super(ImageOnlyNet, self).__init__()
         self.conv1 = nn.Conv2d(in_channels=3, out_channels=32, kernel_size=4, stride=2)
+        self.conv1_bn = nn.BatchNorm2d(self.conv1.out_channels)
+
         self.conv2 = nn.Conv2d(in_channels=32, out_channels=32, kernel_size=4, stride=2)
+        self.conv2_bn = nn.BatchNorm2d(self.conv2.out_channels)
+
         self.conv3 = nn.Conv2d(in_channels=32, out_channels=32, kernel_size=4, stride=2)
-        self.drop_layer = nn.Dropout()
+        self.conv3_bn = nn.BatchNorm2d(self.conv3.out_channels)
 
         print("Kernel Size: {}".format(self.conv1.kernel_size))
-        o_height, o_width = output_size(image_height, image_width, self.conv1.kernel_size[0], stride=2)
-        o_height, o_width = output_size(o_height, o_width, self.conv2.kernel_size[0], stride=2)
-        o_height, o_width = output_size(o_height, o_width, self.conv3.kernel_size[0], stride=2)
+        o_height, o_width = out_size_cnns((image_height, image_width), [self.conv1, self.conv2, self.conv3])
 
         linear_input_size = o_height * o_width * self.conv3.out_channels
 
-        hidden_units = 32
-        self.linear1 = nn.Linear(linear_input_size, hidden_units)
-        self.linear2 = nn.Linear(hidden_units, hidden_units)
-        self.linear3 = nn.Linear(hidden_units, joint_dim)
+        hidden_layer_dim = 100
 
+        self.linear1 = nn.Linear(linear_input_size, hidden_layer_dim)
+        self.lin_drop = nn.Dropout()
 
-    def forward(self, img_ins, pose_ins):
-        conv1_out = F.relu(self.conv1(img_ins))
-        conv2_out = F.relu(self.conv2(conv1_out))
-        conv3_out = F.relu(self.conv3(conv2_out))
+        self.linear2 = nn.Linear(hidden_layer_dim, hidden_layer_dim)
+        self.linear3 = nn.Linear(hidden_layer_dim, joint_dim)
+
+    def forward(self, img_ins):
+        conv1_out = F.leaky_relu(self.conv1_bn(self.conv1(img_ins)))
+        conv2_out = F.leaky_relu(self.conv2_bn(self.conv2(conv1_out)))
+        conv3_out = F.leaky_relu(self.conv3_bn(self.conv3(conv2_out)))
 
         flattened_conv = torch.flatten(conv3_out, 1)
 
-        lin1_out = F.relu(self.linear1(flattened_conv))
-        # lin1_out = self.drop_layer(lin1_out)
-        lin2_out = F.relu(self.linear2(lin1_out))
-
+        lin1_out = self.lin_drop(F.leaky_relu(self.linear1(flattened_conv)))
+        lin2_out = F.leaky_relu(self.linear2(lin1_out))
         output = self.linear3(lin2_out)
 
         return output
-"""
+
+def out_size_cnns(img_dims, cnns):
+    current_dims = img_dims
+    for cnn in cnns:
+        current_dims = output_size(current_dims[0], current_dims[1], cnn.kernel_size[0], cnn.stride[0], cnn.padding[0])
+    return current_dims
+
+def output_size(in_height, in_width, kernel_size, stride=1, padding=0):
+    out_height = int((in_height - kernel_size + padding * 2) / stride) + 1
+    out_width = int((in_width - kernel_size + padding * 2) / stride) + 1
+    return (out_height, out_width)
 
 
 class JointsNet(nn.Module):
