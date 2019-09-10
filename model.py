@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 from torch import nn 
+from mdn import MDN
 
 
 class SpatialSoftmax(nn.Module):
@@ -25,6 +26,70 @@ class SpatialSoftmax(nn.Module):
         feature_points = torch.cat((expected_xs, expected_ys), dim=1)
 
         return feature_points
+
+
+class ZhangNet(nn.Module):
+    def __init__(self, im_h, im_w):
+        super(ZhangNet, self).__init__()
+        self.rgb_conv = nn.Conv2d(in_channels=3, out_channels=64, kernel_size=7, stride=2)
+        self.depth_conv = nn.Conv2d(in_channels=1, out_channels=16, kernel_size=7, stride=2)
+
+        self.cn_1 = nn.Conv2d(in_channels=80, out_channels=32, kernel_size=1, stride=1)
+        self.cn_2 = nn.Conv2d(in_channels=32, out_channels=32, kernel_size=3, stride=1)
+        self.cn_3 = nn.Conv2d(in_channels=32, out_channels=32, kernel_size=3, stride=1)
+
+        c_out_h, c_out_w = out_size_cnns((im_h, im_w), [self.rgb_conv, self.cn_1, self.cn_2, self.cn_3])
+        flattened_dims = c_out_h * c_out_w * self.cn_3.out_channels
+
+        hidden_dim = 50
+        image_encoding_dim = 64
+        past_hist_dim = 5 * 7
+        aux_dim = 7
+
+        self.ff_enc = nn.Sequential(
+            nn.Linear(flattened_dims, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, image_encoding_dim),
+            nn.ReLU()
+        )
+
+        self.ff_aux = nn.Sequential(
+            nn.Linear(image_encoding_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, aux_dim),
+        )
+
+        self.ff_out = nn.Sequential(
+            nn.Linear(image_encoding_dim + past_hist_dim + aux_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, 7)
+        )
+
+    def forward(self, rgb_ims, depth_ims, past_poses, current_poses):
+        rgb_enc = F.relu(self.rgb_conv(rgb_ims))
+        depth_enc = F.relu(self.depth_conv(depth_ims))
+
+        combined_im = torch.cat((rgb_enc, depth_enc), dim=1)
+
+        c_out = F.relu(self.cn_1(combined_im))
+        c_out = F.relu(self.cn_2(c_out))
+        c_out = F.relu(self.cn_3(c_out))
+
+        flattened_im = torch.flatten(c_out, 1)
+        flattened_past = torch.flatten(past_poses, 1)
+
+        img_enc = self.ff_enc(flattened_im)
+        aux_out = self.ff_aux(img_enc)
+
+        full_encoding = torch.cat((img_enc, flattened_past, current_poses), dim=1)
+        output = self.ff_out(full_encoding)
+        return output, aux_out
 
 
 class LevineNet(nn.Module):
@@ -172,6 +237,38 @@ def output_size(in_height, in_width, kernel_size, stride=1, padding=0):
     out_height = int((in_height - kernel_size + padding * 2) / stride) + 1
     out_width = int((in_width - kernel_size + padding * 2) / stride) + 1
     return (out_height, out_width)
+
+
+class ImageOnlyMDN(nn.Module):
+    def __init__(self, image_height, image_width, joint_dim, mix_num):
+        super(ImageOnlyMDN, self).__init__()
+        self.conv1 = nn.Conv2d(in_channels=3, out_channels=32, kernel_size=4, stride=2)
+        self.conv1_bn = nn.BatchNorm2d(self.conv1.out_channels)
+
+        self.conv2 = nn.Conv2d(in_channels=32, out_channels=32, kernel_size=4, stride=2)
+        self.conv2_bn = nn.BatchNorm2d(self.conv2.out_channels)
+
+        self.conv3 = nn.Conv2d(in_channels=32, out_channels=32, kernel_size=4, stride=2)
+        self.conv3_bn = nn.BatchNorm2d(self.conv3.out_channels)
+
+        print("Kernel Size: {}".format(self.conv1.kernel_size))
+        o_height, o_width = out_size_cnns((image_height, image_width), [self.conv1, self.conv2, self.conv3])
+        linear_input_size = o_height * o_width * self.conv3.out_channels
+        hidden_layer_dim = 512
+
+        self.mdn = MDN(linear_input_size, hidden_layer_dim, joint_dim, mix_num)
+
+
+    def forward(self, img_ins):
+        conv1_out = F.leaky_relu(self.conv1_bn(self.conv1(img_ins)))
+        conv2_out = F.leaky_relu(self.conv2_bn(self.conv2(conv1_out)))
+        conv3_out = F.leaky_relu(self.conv3_bn(self.conv3(conv2_out)))
+
+        flattened_conv = torch.flatten(conv3_out, 1)
+
+        mu, std, pi = self.mdn(flattened_conv)
+
+        return mu, std, pi
 
 
 class JointsNet(nn.Module):

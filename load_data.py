@@ -11,6 +11,74 @@ from helper_funcs.utils import find_last
 from glob import glob
 from PIL import Image
 
+class ImageRGBDPoseHist(Dataset):
+
+    def __init__(self,
+                 images_by_demo,
+                 ee_name,
+                 rgb_trans=None,
+                 depth_trans=None):
+        # self.images_by_demo = images_by_demo
+        self.images_by_demo = images_by_demo
+        self.ee_name = ee_name
+        self.rgb_trans = rgb_trans
+        self.depth_trans = depth_trans
+
+        print("Loading {} files".format(len(self.images_by_demo)))
+
+        # We don't want the final image, because we need to predict future
+        # And we dont want first 4, because we are using past history as an input
+        self.data_points = []
+        for demo_id in range(len(images_by_demo)):
+            for img_id in range(5, len(images_by_demo[demo_id]) - 1):
+                self.data_points.append(self.load_data_point(demo_id, img_id))
+
+    def __len__(self):
+        return len(self.data_points)
+
+    def __getitem__(self, idx):
+        return self.data_points[idx]
+
+    def load_data_point(self, demo_id, img_id):
+
+        past_im_paths = self.images_by_demo[demo_id][img_id - 5: img_id]
+        current_im_path = self.images_by_demo[demo_id][img_id]
+        next_im_path = self.images_by_demo[demo_id][img_id + 1]
+
+        depth_path = current_im_path.replace("_color_", "_depth_")
+        raw_rgb = cv2.imread(current_im_path)
+        raw_depth = np.expand_dims(cv2.imread(depth_path, cv2.IMREAD_GRAYSCALE) , 2)
+
+        if self.rgb_trans is not None:
+            img_rgb = self.rgb_trans(raw_rgb)
+        else:
+            img_rgb = raw_rgb
+
+        if self.depth_trans is not None:
+            img_depth = self.depth_trans(raw_depth)
+        else:
+            img_depth = raw_depth
+
+        past_poses_np = get_pose_hist(past_im_paths, self.ee_name)
+        current_pose_np = get_pose_hist([current_im_path], self.ee_name)[0]
+        next_pose_np = get_pose_hist([next_im_path], self.ee_name)[0]
+
+        past_poses = torch.from_numpy(past_poses_np).to(dtype=torch.float)
+        current_pose = torch.from_numpy(current_pose_np).to(dtype=torch.float)
+        next_pose = torch.from_numpy(next_pose_np).to(dtype=torch.float)
+
+        return img_rgb, img_depth, past_poses, current_pose, next_pose
+
+def get_pose_hist(img_paths, ee_name):
+    folder_paths, img_names = zip(*[split(ip) for ip in img_paths])
+    folder_path = folder_paths[0] # Assumption is that all images are in same folder...
+    ts_reg = re.compile(r'.*_(\d+)\.jpg')
+    repl_form = r'{}_\1.txt'.format(ee_name)
+    pose_paths = [join(folder_path, ts_reg.sub(repl_form, img_name)) for img_name in img_names]
+
+    poses = np.stack([np.genfromtxt(p) for p in pose_paths])
+    return poses
+
 
 def image_demo_paths(demos_root, image_glob):
     demo_paths = [join(demos_root, d) for d in sorted(os.listdir(demos_root))]
@@ -29,6 +97,21 @@ def load_demos(demos_folder, image_glob, batch_size, joint_names,
 
 
     d_set = ImagePoseFuturePoseDataSet(demos, joint_names, skip_count, im_trans)
+    d_loader = DeviceDataLoader(DataLoader(d_set, batch_size, shuffle=shuffled), device)
+
+    return d_set, d_loader
+
+def load_rgbd_demos(demos_folder, image_glob, batch_size, ee_name,
+               rgb_trans, depth_trans, shuffled, device, from_demo=None, to_demo=None,
+               frame_limit=None):
+    demo_paths = image_demo_paths(demos_folder, image_glob)
+    print(demo_paths[from_demo][0])
+
+    demos = [d[0:frame_limit] for d in demo_paths[from_demo:to_demo]]
+    print("Demo Length - Raw: {}, Processed {}".format(len(demo_paths[from_demo]), [len(demos[0])]))
+
+
+    d_set = ImageRGBDPoseHist(demos, ee_name, rgb_trans, depth_trans)
     d_loader = DeviceDataLoader(DataLoader(d_set, batch_size, shuffle=shuffled), device)
 
     return d_set, d_loader

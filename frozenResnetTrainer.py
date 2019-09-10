@@ -15,7 +15,12 @@ import os
 import pandas as pd
 import numpy as np
 
-# Oh... will probably have to change the input file format and stuff too!
+def Weighted_MSE(joint_weights):
+    def lf(predicted_joints, target_joints):
+        squared_diffs = (predicted_joints - target_joints).pow(2)
+        return (squared_diffs * joint_weights).mean()
+    return lf
+
 class ResnetJointPredictor(nn.Module):
     def __init__(self, image_height, image_width, joint_dim):
         super(ResnetJointPredictor, self).__init__()
@@ -62,7 +67,7 @@ if __name__ == "__main__":
         torch.device("cuda"),
         from_demo=0,
         to_demo=60,
-        skip_count=5)
+        skip_count=3)
 
     validation_set, validation_loader = load_demos(
         exp_config["demo_folder"],
@@ -74,20 +79,25 @@ if __name__ == "__main__":
         torch.device("cuda"),
         from_demo=60,
         to_demo=80,
-        skip_count=5)
+        skip_count=3)
 
     model = ResnetJointPredictor(im_params["resize_height"], im_params["resize_width"], len(exp_config["nn_joint_names"]))
     model.to(torch.device("cuda"))
     optimizer = optim.Adam(model.parameters())
-    # joint_weights = torch.linspace(10, 1, len(exp_config["nn_joint_names"]), device=torch.device("cuda"))
-    loss_criterion = nn.MSELoss()
+    joint_weights = torch.linspace(10, 1, len(exp_config["nn_joint_names"]), device=torch.device("cuda"))
+    loss_criterion = Weighted_MSE(joint_weights)# nn.MSELoss()
 
-    results_folder = "logs/frozen-resnet{}".format(t_stamp())
+    results_folder = "logs/frozen-resnet-wj-skip-2{}".format(t_stamp())
     if not os.path.exists(results_folder):
         os.makedirs(results_folder)
 
 
     for epoch in range(exp_config["epochs"]):
+        # Unfreeze after you've learned a little
+        if epoch == 10:
+            for param in model.resnet.parameters():
+                param.requires_grad = True
+
         model.train()
         train_losses = []
         for i, in_batch in enumerate(train_loader):

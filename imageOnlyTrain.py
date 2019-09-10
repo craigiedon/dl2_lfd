@@ -1,4 +1,5 @@
-from model import ImageOnlyNet
+from model import ImageOnlyMDN
+from mdn import mdn_loss, mdn_sample
 import torch
 from torch import nn, optim
 import torch.nn.functional as F
@@ -19,6 +20,7 @@ def Weighted_MSE(joint_weights):
         return (squared_diffs * joint_weights).mean()
     return lf
 
+
 if __name__ == "__main__":
     exp_config = load_json("config/experiment_config.json")
     im_params = exp_config["image_config"]
@@ -32,7 +34,7 @@ if __name__ == "__main__":
         True,
         torch.device("cuda"),
         from_demo=0,
-        to_demo=60,
+        to_demo=1,
         skip_count=5)
 
     validation_set, validation_loader = load_demos(
@@ -43,17 +45,18 @@ if __name__ == "__main__":
         get_trans(im_params, distorted=False),
         False,
         torch.device("cuda"),
-        from_demo=60,
-        to_demo=80,
+        from_demo=1,
+        to_demo=2,
         skip_count=5)
 
-    model = ImageOnlyNet(im_params["resize_height"], im_params["resize_width"], len(exp_config["nn_joint_names"]))
+    model = ImageOnlyMDN(im_params["resize_height"], im_params["resize_width"], len(exp_config["nn_joint_names"]), 5)
     model.to(torch.device("cuda"))
-    optimizer = optim.Adam(model.parameters())
-    joint_weights = torch.linspace(10, 1, len(exp_config["nn_joint_names"]), device=torch.device("cuda"))
-    loss_criterion = Weighted_MSE(joint_weights) #nn.MSELoss()
+    current_lr = 1e-5
+    optimizer = optim.Adam(model.parameters(), lr=current_lr)
+    # joint_weights = torch.linspace(10, 1, len(exp_config["nn_joint_names"]), device=torch.device("cuda"))
+    loss_criterion = mdn_loss #Weighted_MSE(joint_weights) #nn.MSELoss()
 
-    results_folder = "logs/image-only-weighted-joints{}".format(t_stamp())
+    results_folder = "logs/image-only-mdn-dropout-{}".format(t_stamp())
     if not os.path.exists(results_folder):
         os.makedirs(results_folder)
 
@@ -65,8 +68,8 @@ if __name__ == "__main__":
 
             temp_print("T Batch {}/{}".format(i, len(train_loader)))
             (img_ins, _), target_joints = in_batch
-            predicted_joints = model(img_ins)
-            train_loss = loss_criterion(predicted_joints, target_joints)
+            mu, std, pi = model(img_ins)
+            train_loss = loss_criterion(mu, std, pi, target_joints)
             train_losses.append(train_loss.item())
             optimizer.zero_grad()
             train_loss.backward()
@@ -79,8 +82,8 @@ if __name__ == "__main__":
             temp_print("V Batch {}/{}".format(i, len(validation_loader)))
             with torch.no_grad():
                 (img_ins, _), target_joints = in_batch
-                predicted_joints = model(img_ins)
-                val_loss = loss_criterion(predicted_joints, target_joints)
+                mu, std, pi = model(img_ins)
+                val_loss = loss_criterion(mu, std, pi, target_joints)
                 val_losses.append(val_loss.item())
 
         t_loss_mean = np.mean(train_losses)
@@ -96,3 +99,9 @@ if __name__ == "__main__":
 
         if epoch % 10 == 0:
             torch.save(model.state_dict(), join(results_folder, "learned_model_epoch_{}.pt".format(epoch)))
+        
+        if (epoch + 1) % 100 == 0:
+            current_lr *= 0.1
+            optimizer = optim.Adam(model.parameters(), lr = current_lr)
+            print("Updated optimizer...")
+    torch.save(model.state_dict(), join(results_folder, "learned_model_epoch_final.pt"))

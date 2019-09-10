@@ -4,14 +4,14 @@ import matplotlib.patches as patches
 import matplotlib.animation as animation
 import sys
 from math import ceil
-from model import load_model
-from load_data import load_demos, nn_input_to_imshow, show_torched_im
+from model import load_model, ImageOnlyMDN, ZhangNet
+from load_data import load_demos, load_rgbd_demos, nn_input_to_imshow, show_torched_im
 import numpy as np
 import torch
 from helper_funcs.utils import zip_chunks, load_json, load_json_lines
 
-from torchvision.transforms import Compose
-from helper_funcs.transforms import Crop 
+# from torchvision.transforms import Compose
+from helper_funcs.transforms import get_trans, get_grayscale_trans
 
 """
 def chart_train_validation_error(train_results_path, validation_results_path):
@@ -44,6 +44,29 @@ def plot_csv(csv_path, save_path=None, show_fig=False, col_subset=None):
     plt.xlabel("Epoch")
     plt.ylabel("Losses")
     plt.legend()
+    if save_path is not None:
+        plt.savefig(save_path)
+
+    if show_fig:
+        plt.show()
+
+    plt.close()
+
+def plot_csv_train_val(csv_path, save_path=None, show_fig=False):
+    df = pd.read_csv(csv_path, sep=",")
+    # print(training_df)
+    # df.plot(subplots=True)
+
+    train_cols = [c for c in df.columns if c.startswith("T")]
+    val_cols = [c for c in df.columns if c.startswith("V")]
+    for i, (t_col, v_col) in enumerate(zip(train_cols, val_cols)):
+        plt.subplot(ceil(len(train_cols) / 3), 3, i + 1)
+        plt.plot(df[t_col], label=t_col)
+        plt.plot(df[v_col], label=v_col)
+        plt.xlabel("Epoch")
+        plt.ylabel("Loss")
+        plt.legend()
+
     if save_path is not None:
         plt.savefig(save_path)
 
@@ -157,6 +180,70 @@ def animate_spatial_features(model_path, demos_folder, demo_num):
     return ani
             
 
+def chart_pred_pose(model_path, demo_path, demo_num):
+    exp_config = load_json("config/experiment_config.json")
+    im_params = exp_config["image_config"]
+
+    _, demo_loader = load_rgbd_demos(
+        demo_path,
+        im_params["file_glob"],
+        exp_config["batch_size"],
+        "l_wrist_roll_link",
+        get_trans(im_params, distorted=True),
+        get_grayscale_trans(im_params),
+        False,
+        torch.device("cuda"),
+        from_demo=demo_num,
+        to_demo=demo_num + 1)
+
+    model = ZhangNet(im_params["resize_height"], im_params["resize_width"])
+    model.load_state_dict(torch.load(model_path, map_location=torch.device("cuda")))
+    model.to(torch.device("cuda"))
+
+    model.eval()
+    next_pred_all = []
+    current_pred_all = []
+    current_targets_all = []
+    next_targets_all = []
+
+    with torch.no_grad():
+        for ins in demo_loader:
+            rgb_ins, depth_ins, past_ins, current_ins, target_ins = ins 
+            next_pred, current_pred = model(rgb_ins, depth_ins, past_ins, current_ins)
+            next_pred_all.append(next_pred)
+            current_pred_all.append(current_pred)
+            current_targets_all.append(current_ins)
+            next_targets_all.append(target_ins)
+    
+    next_pred_all = torch.cat(next_pred_all)
+    current_pred_all = torch.cat(current_pred_all)
+    current_targets_all = torch.cat(current_targets_all)
+    next_targets_all = torch.cat(next_targets_all)
+
+    # Shapes: N X 7
+
+    next_pred_all = next_pred_all.permute(1,0).cpu().numpy()
+    current_pred_all = current_pred_all.permute(1,0).cpu().numpy()
+    current_targets_all = current_targets_all.permute(1,0).cpu().numpy()
+    next_targets_all = next_targets_all.permute(1,0).cpu().numpy()
+
+
+    n_pose_dims, n_samples = next_pred_all.shape[0], next_pred_all.shape[1]
+    dim_names = ["p-x", "p-y", "p-z", "rot-x", "rot-y", "rot-z", "rot-w"]
+    for dim_id in range(n_pose_dims):
+        plt.subplot(ceil(n_pose_dims / 3.0), 3, dim_id + 1)
+        plt.plot(next_pred_all[dim_id], label="Predicted Pose")
+        # plt.plot(current_pred_all[dim_id], label="Aux Prediction")
+        # plt.plot(current_targets_all[dim_id], label="Target Pose")
+        plt.plot(next_targets_all[dim_id], label="Target Pose")
+        plt.legend()
+        plt.xlabel("t")
+        plt.ylabel(dim_names[dim_id])
+
+    plt.show()
+
+    
+
 def chart_demo_joint_trajectories(demo_path, demo_num):
     exp_config = load_json("config/experiment_config.json")
     # TODO: This is in multiple places, so I think it needs to be config
@@ -205,6 +292,93 @@ def chart_demo_joint_trajectories(demo_path, demo_num):
         c_ax.set_ylabel("Normed Angle")
     
     plt.show()
+
+def chart_mdn_means(model_path, demo_path, demo_num):
+    exp_config = load_json("config/experiment_config.json")
+    im_params = exp_config["image_config"]
+    model = ImageOnlyMDN(im_params["resize_height"], im_params["resize_width"], len(exp_config["nn_joint_names"]), 5)
+    model.load_state_dict(torch.load(model_path, map_location=torch.device("cuda")))
+    model.to(torch.device("cuda"))
+
+    demo_set, demo_loader = load_demos(
+        demo_path,
+        im_params["file_glob"],
+        exp_config["batch_size"],
+        exp_config["nn_joint_names"],
+        get_trans(im_params),
+        False,
+        torch.device("cuda"),
+        from_demo=demo_num,
+        to_demo=demo_num + 1,
+        skip_count=5
+    )
+
+    model.eval()
+    mu_all = []
+    std_all = []
+    pis_all = []
+    targets_all = []
+
+    with torch.no_grad():
+        for (ins, targets) in demo_loader:
+            img_ins, current_pos = ins
+            mus, stds, pis = model(img_ins)
+            # print("St-dev:", stds)
+            mu_all.append(mus)
+            std_all.append(stds)
+            pis_all.append(pis)
+            targets_all.append(targets)
+    
+    mu_all = torch.cat(mu_all)
+    std_all = torch.cat(std_all)
+    pis_all = torch.cat(pis_all)
+    targets_all = torch.cat(targets_all)
+
+    # Im expecting: mu: N x 5 X 7, std: N x 5, pis: N * 5, targets_all: N * 7
+    # print("Shapes: mu: {}, std: {}, pis {}, targets{}".format(mu_all.shape, std_all.shape, pis_all.shape, targets_all.shape))
+
+    # I want : mu: 7 X 5 X N, std: 5 X N, pis: 5 X N, targets_all: 7 * N
+    mu_all = mu_all.permute(2,1,0).cpu().numpy()
+    std_all = std_all.permute(1,0).cpu().numpy()
+    pis_all = pis_all.permute(1,0).cpu().numpy()
+    targets_all = targets_all.permute(1,0).cpu().numpy()
+
+    print("Shapes: mu: {}, std: {}, pis {}, targets{}".format(mu_all.shape, std_all.shape, pis_all.shape, targets_all.shape))
+
+
+    fig = plt.figure()
+
+    print("STD example", std_all[0][0])
+
+    n_joints, n_components, n_samples = mu_all.shape[0], mu_all.shape[1], mu_all.shape[2]
+    for joint_id in range(n_joints):
+        plt.subplot(ceil(n_joints / 3.0), 3, joint_id + 1)
+        for pi_id in range(n_components):
+            plt.plot(mu_all[joint_id, pi_id], label="pi-{}".format(pi_id))
+            plt.fill_between(range(n_samples), mu_all[joint_id, pi_id] - std_all[pi_id], mu_all[joint_id, pi_id] + std_all[pi_id], alpha=0.1)
+
+
+        weighted_mus = mu_all[joint_id] * pis_all
+        averaged_mus = weighted_mus.mean(0)
+        print("muall: {}, pis_all: {} Weighted: {}, Averaged: {}".format(mu_all.shape, pis_all.shape, weighted_mus.shape, averaged_mus.shape))
+        plt.plot(averaged_mus, label="Averaged")
+        plt.plot(targets_all[joint_id], label="Targets")
+
+        plt.legend()
+        plt.title(exp_config["nn_joint_names"][joint_id])
+        plt.xlabel("t")
+        plt.ylabel("Normed Radians")
+
+    plt.subplot(ceil(n_joints / 3.0), 3, n_joints + 1)
+    for pi_id in range(n_components):
+        plt.plot(pis_all[pi_id], label="pi_{}".format(pi_id))
+    plt.legend()
+    plt.xlabel("t")
+    plt.ylabel("Component Weight")
+    plt.title("Pis")
+
+    plt.show()
+
 
 def chart_demo_predictions(model_path, demo_path, demo_num):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
