@@ -34,7 +34,7 @@ def send_arm_goal(j_pos, arm_publisher, joint_names):
         positions=j_pos,
         velocities=[0.0] * len(j_pos),
         accelerations=[0.0] * len(j_pos),
-        time_from_start=rospy.Duration(0.75))]
+        time_from_start=rospy.Duration(2))]
 
     jt = JointTrajectory(joint_names=joint_names,points=jtps)
     jt.header.stamp = rospy.Time.now()
@@ -171,18 +171,18 @@ def sanity_check():
         "r_wrist_roll_joint"]
 
 
-    device = torch.device("cpu")
-    im_params = exp_config["image_config"]
+    # device = torch.device("cpu")
+    # im_params = exp_config["image_config"]
 
 
-    model = ResnetJointPredictor(im_params["resize_height"], im_params["resize_width"], len(exp_config["nn_joint_names"]))
-    model.load_state_dict(torch.load(model_path, map_location=device))
-    model.to(device)
+    # model = ResnetJointPredictor(im_params["resize_height"], im_params["resize_width"], len(exp_config["nn_joint_names"]))
+    # model.load_state_dict(torch.load(model_path, map_location=device))
+    # model.to(device)
 
-    state_cache = RobotStateCache(exp_config["nn_joint_names"])
-    image_sub = rospy.Subscriber('/kinect2/qhd/image_color_rect', Image, state_cache.update_img)
-    joints_sub = rospy.Subscriber('/joint_states', JointState, state_cache.update_joint_pos)
-    print("Subscribed")
+    # state_cache = RobotStateCache(exp_config["nn_joint_names"])
+    # image_sub = rospy.Subscriber('/kinect2/qhd/image_color_rect', Image, state_cache.update_img)
+    # joints_sub = rospy.Subscriber('/joint_states', JointState, state_cache.update_joint_pos)
+    # print("Subscribed")
 
 
 
@@ -231,10 +231,10 @@ def sanity_check():
 
 
     print('Robot policy Prepared.')
-    model.eval()
+    # model.eval()
     while not rospy.is_shutdown():
         print("step")
-        act(state_cache, model, left_command, exp_config["nn_joint_names"])
+        # act(state_cache, model, left_command, exp_config["nn_joint_names"])
         r.sleep()
 
     print('Done.')

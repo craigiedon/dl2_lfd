@@ -1,0 +1,10 @@
+<launch>
+  <node name="left_endeffector_ps" 
+    pkg="dl2_lfd" 
+    type="frame_as_posestamped.py"
+    args="l_wrist_roll_link base_link 30"/>
+  <node name="right_endeffector_ps" 
+    pkg="dl2_lfd" 
+    type="frame_as_posestamped.py"
+    args="r_wrist_roll_link base_link 30"/>
+</launch>
