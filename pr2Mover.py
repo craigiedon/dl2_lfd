@@ -7,12 +7,13 @@ import numpy as np
 import cv2
 import geometry_msgs
 
-from model import load_model
+from model import load_model, ImageOnlyNet
 from load_data import cv_to_nn_input, nn_input_to_imshow, load_demos, unnorm_pose, wrap_pose
-from torchvision.transforms import Compose
+from torchvision.transforms import Compose, Normalize
 from helper_funcs.utils import load_json, byteify
-from helper_funcs.transforms import get_trans
-from autoencoder import EncodeDecodePredictor
+from frozenResnetTrainer import ResnetJointPredictor
+# from helper_funcs.transforms import get_trans
+# from autoencoder import EncodeDecodePredictor
 
 # ROS
 import rospy # Ros Itself
@@ -24,7 +25,7 @@ import moveit_commander
 
 import torch
 
-IMAGE_SIZE = 128
+IMAGE_SIZE = 224
 
 
 def send_arm_goal(j_pos, arm_publisher, joint_names):
@@ -33,10 +34,12 @@ def send_arm_goal(j_pos, arm_publisher, joint_names):
         positions=j_pos,
         velocities=[0.0] * len(j_pos),
         accelerations=[0.0] * len(j_pos),
-        time_from_start=rospy.Duration(1.5))]
+        time_from_start=rospy.Duration(0.75))]
 
     jt = JointTrajectory(joint_names=joint_names,points=jtps)
     jt.header.stamp = rospy.Time.now()
+
+    print("Sending arm goal...")
 
     arm_publisher.publish(jt)
 
@@ -53,17 +56,18 @@ def act(last_state, model, arm_publisher, joint_names):
         cv2.imshow('Input', cv2.cvtColor(nn_input_to_imshow(torch_im), cv2.COLOR_RGB2BGR))
         cv2.waitKey(100)
 
+        # Additional step for resnet model
+        normalizer = Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        torch_im = normalizer(torch_im)
+
         next_pos_normed = model(torch.unsqueeze(torch_im, 0))[0].squeeze()
         next_pos = unnorm_pose(next_pos_normed).tolist()
 
         # print("Joint Names: {}".format(joint_names))
         # print("Curret Pos: {}".format(torch_pos))
 
-        print("Current Pos Raw: {}".format(last_state.joint_pos))
         print("Current Pos Norm-Unnormed {}".format(unnorm_pose(torch_pos)))
-
-        # print("Next Pos Normed: {}".format(next_pos_normed))
-        # print("Next Pos Prediction: {}".format(next_pos))
+        print("Next Pos Prediction: {}".format(next_pos))
 
     send_arm_goal(next_pos, arm_publisher, joint_names)
 
@@ -146,15 +150,15 @@ def sanity_check():
     model_path = sys.argv[1]
     rospy.init_node('pr2_mover', anonymous=True)
     moveit_commander.roscpp_initialize(sys.argv)
-    r = rospy.Rate(0.5)
+    r = rospy.Rate(1)
 
     exp_config = byteify(load_json("config/experiment_config.json"))
 
     pr2_left = setup_moveit_group("left_arm")
     pr2_right = setup_moveit_group("right_arm")
 
-    left_command = rospy.Publisher('/l_arm_controller/command', JointTrajectory)
-    right_command = rospy.Publisher('/r_arm_controller/command', JointTrajectory)
+    left_command = rospy.Publisher('/l_arm_controller/command', JointTrajectory, queue_size=10)
+    right_command = rospy.Publisher('/r_arm_controller/command', JointTrajectory, queue_size=10)
 
 
     right_joints = [
@@ -169,10 +173,9 @@ def sanity_check():
 
     device = torch.device("cpu")
     im_params = exp_config["image_config"]
-    im_trans = get_trans(im_params)
 
 
-    model = EncodeDecodePredictor(im_params["resize_height"], im_params["resize_width"], 512, 100, len(exp_config["nn_joint_names"]))
+    model = ResnetJointPredictor(im_params["resize_height"], im_params["resize_width"], len(exp_config["nn_joint_names"]))
     model.load_state_dict(torch.load(model_path, map_location=device))
     model.to(device)
 
@@ -199,9 +202,18 @@ def sanity_check():
     left_start = [ 0.2242,  0.3300,  1.4105, -0.8090,  0.1163, -0.9732,  0.2731]
     right_start = [-0.7920,  0.5493, -1.1246, -1.0972, -0.8366, -1.0461, -0.0410]
 
+
+    r.sleep()
+    r.sleep()
+    r.sleep()
+    r.sleep()
+    r.sleep()
     send_arm_goal(left_start, left_command, exp_config["nn_joint_names"])
     send_arm_goal(right_start, right_command, right_joints)
-
+    r.sleep()
+    r.sleep()
+    r.sleep()
+    r.sleep()
 
 
     # ### Setup robot in initial pose using the moveit controllers
