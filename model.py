@@ -43,8 +43,8 @@ class ZhangNet(nn.Module):
 
         hidden_dim = 50
         image_encoding_dim = 64
-        past_hist_dim = 5 * 7
-        aux_dim = 7
+        ee_dim = 6
+        past_hist_dim = 5 * ee_dim
 
         self.ff_enc = nn.Sequential(
             nn.Linear(flattened_dims, hidden_dim),
@@ -60,18 +60,18 @@ class ZhangNet(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, aux_dim),
+            nn.Linear(hidden_dim, ee_dim),
         )
 
         self.ff_out = nn.Sequential(
-            nn.Linear(image_encoding_dim + past_hist_dim + aux_dim, hidden_dim),
+            nn.Linear(image_encoding_dim + past_hist_dim + ee_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, 7)
+            nn.Linear(hidden_dim, ee_dim)
         )
 
-    def forward(self, rgb_ims, depth_ims, past_poses, current_poses):
+    def forward(self, rgb_ims, depth_ims, past_poses):
         rgb_enc = F.relu(self.rgb_conv(rgb_ims))
         depth_enc = F.relu(self.depth_conv(depth_ims))
 
@@ -87,7 +87,7 @@ class ZhangNet(nn.Module):
         img_enc = self.ff_enc(flattened_im)
         aux_out = self.ff_aux(img_enc)
 
-        full_encoding = torch.cat((img_enc, flattened_past, current_poses), dim=1)
+        full_encoding = torch.cat((img_enc, flattened_past, aux_out), dim=1)
         output = self.ff_out(full_encoding)
         return output, aux_out
 

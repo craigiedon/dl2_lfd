@@ -208,11 +208,11 @@ def chart_pred_pose(model_path, demo_path, demo_num):
 
     with torch.no_grad():
         for ins in demo_loader:
-            rgb_ins, depth_ins, past_ins, current_ins, target_ins = ins 
-            next_pred, current_pred = model(rgb_ins, depth_ins, past_ins, current_ins)
+            rgb_ins, depth_ins, past_ins, target_ins = ins 
+            next_pred, current_pred = model(rgb_ins, depth_ins, past_ins)
             next_pred_all.append(next_pred)
             current_pred_all.append(current_pred)
-            current_targets_all.append(current_ins)
+            current_targets_all.append(past_ins[:, 4])
             next_targets_all.append(target_ins)
     
     next_pred_all = torch.cat(next_pred_all)
@@ -229,7 +229,7 @@ def chart_pred_pose(model_path, demo_path, demo_num):
 
 
     n_pose_dims, n_samples = next_pred_all.shape[0], next_pred_all.shape[1]
-    dim_names = ["p-x", "p-y", "p-z", "rot-x", "rot-y", "rot-z", "rot-w"]
+    dim_names = ["p-x", "p-y", "p-z", "roll", "pitch", "yaw"]
     for dim_id in range(n_pose_dims):
         plt.subplot(ceil(n_pose_dims / 3.0), 3, dim_id + 1)
         plt.plot(next_pred_all[dim_id], label="Predicted Pose")

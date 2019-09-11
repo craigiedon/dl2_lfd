@@ -18,6 +18,7 @@ import torch
 from model import ZhangNet
 from cv_bridge import CvBridge
 import cv2
+from scipy.spatial.transform import Rotation as R
 
 def move_to_pos_rpy(group, pos, rpy):
     quat = tf.transformations.quaternion_from_euler(*rpy)
@@ -110,62 +111,65 @@ def main(model_path):
     move_to_pos_quat(r_group, right_start_pos, right_start_quat)
 
     # Open Loop: Just replicating the training run
-    # i = 0
-    # while not rospy.is_shutdown():
-    #     l_goal = train_set[i][4].numpy().astype(np.float64)
-    #     l_pos = l_goal[0:3]
-    #     l_quat = l_goal[3:]
-    #     print("pos", l_pos)
-    #     print("quat", l_quat)
-    #     print(left_start_pos)
+    i = 0
+    while not rospy.is_shutdown():
+        l_goal = train_set[i][3].numpy().astype(np.float64)
+        l_pos = l_goal[0:3]
+        l_rpy = l_goal[3:] * np.pi
 
-    #     move_to_pos_quat(l_group, l_pos, l_quat)
+        l_quat = R.from_euler(l_rpy).as_quat()
+
+        print("pos", l_pos)
+        print("rpy", l_rpy)
+        print("quat", l_quat)
+
+        # move_to_pos_quat(l_group, l_pos, l_quat)
         
-    #     if i + 5 < len(train_set) - 1:
-    #         i += 5
+        if i + 5 < len(train_set) - 1:
+            i += 5
 
-    #     r.sleep()
+        r.sleep()
 
     # Closed Loop
-    pose_history = deque(maxlen=5)
-    while not rospy.is_shutdown():
-        print("Step")
-        if not state_cache.is_empty():
-            torch_rgb = rgb_trans(state_cache.rgb_im)
-            torch_depth = depth_trans(state_cache.depth_im)
-            pose_history.append(state_cache.pose)
-            # plt.show()
-            # print("Depth im:", torch_depth.squeeze())
-            # color_path = "demos/gear_good/demo_2019_06_26_15_58_59/kinect2_qhd_image_color_rect_1561561145828572837.jpg"
-            # sanity_im = rgb_trans(cv2.imread(color_path))
+    # pose_history = deque(maxlen=5)
+    # while not rospy.is_shutdown():
+    #     print("Step")
+    #     if not state_cache.is_empty():
+    #         torch_rgb = rgb_trans(state_cache.rgb_im)
+    #         torch_depth = depth_trans(state_cache.depth_im)
+    #         pose_history.append(state_cache.pose)
+    #         # plt.show()
+    #         # print("Depth im:", torch_depth.squeeze())
+    #         # color_path = "demos/gear_good/demo_2019_06_26_15_58_59/kinect2_qhd_image_color_rect_1561561145828572837.jpg"
+    #         # sanity_im = rgb_trans(cv2.imread(color_path))
 
-            # plt.subplot(1,2, 1)
-            # plt.imshow(nn_input_to_imshow(torch_rgb))
-            # plt.subplot(1,2,2)
-            # plt.imshow(nn_input_to_imshow(sanity_im))
-            # plt.show()
+    #         # plt.subplot(1,2, 1)
+    #         # plt.imshow(nn_input_to_imshow(torch_rgb))
+    #         # plt.subplot(1,2,2)
+    #         # plt.imshow(nn_input_to_imshow(sanity_im))
+    #         # plt.show()
 
 
-            if len(pose_history) == 5:
-                # Ready to go!
-                torch_pose_hist = torch.tensor(pose_history)
-                print("Pose History: ", torch_pose_hist)
-                with torch.no_grad():
-                    current_pose = torch_pose_hist[4]
-                    current_position = current_pose[0:3].numpy().astype(np.float64)
-                    current_quat = current_pose[3:].numpy().astype(np.float64)
+    #         if len(pose_history) == 5:
+    #             # Ready to go!
+    #             torch_pose_hist = torch.tensor(pose_history)
+    #             print("Pose History: ", torch_pose_hist)
+    #             with torch.no_grad():
+    #                 current_pose = torch_pose_hist[4]
+    #                 current_position = current_pose[0:3].numpy().astype(np.float64)
+    #                 current_quat = current_pose[3:].numpy().astype(np.float64)
 
-                    print(torch_rgb)
-                    next_pose, _ = model(torch_rgb.unsqueeze(0), torch_depth.unsqueeze(0), torch_pose_hist.unsqueeze(0), torch_pose_hist[4].unsqueeze(0))
-                    next_position = next_pose[0][0:3].numpy().astype(np.float64)
-                    next_quat = next_pose[0][3:].numpy().astype(np.float64)
+    #                 print(torch_rgb)
+    #                 next_pose, _ = model(torch_rgb.unsqueeze(0), torch_depth.unsqueeze(0), torch_pose_hist.unsqueeze(0), torch_pose_hist[4].unsqueeze(0))
+    #                 next_position = next_pose[0][0:3].numpy().astype(np.float64)
+    #                 next_quat = next_pose[0][3:].numpy().astype(np.float64)
 
-                    print("Predicted Pose:", next_pose)
-                    print("Predicted Position", next_position)
-                    print("Predicted Quaternion", next_quat)
-                    move_to_pos_quat(l_group, next_position, next_quat)
-                    # move_to_pos_quat(l_group, next_position, current_quat)
-        r.sleep()
+    #                 print("Predicted Pose:", next_pose)
+    #                 print("Predicted Position", next_position)
+    #                 print("Predicted Quaternion", next_quat)
+    #                 move_to_pos_quat(l_group, next_position, next_quat)
+    #                 # move_to_pos_quat(l_group, next_position, current_quat)
+    #     r.sleep()
 
 
 

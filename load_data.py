@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
 from helper_funcs.utils import find_last
 from glob import glob
-from PIL import Image
+from scipy.spatial.transform import Rotation as R
 
 class ImageRGBDPoseHist(Dataset):
 
@@ -41,12 +41,12 @@ class ImageRGBDPoseHist(Dataset):
 
     def load_data_point(self, demo_id, img_id):
 
-        past_im_paths = self.images_by_demo[demo_id][img_id - 5: img_id]
-        current_im_path = self.images_by_demo[demo_id][img_id]
+        past_im_paths = self.images_by_demo[demo_id][img_id - 4: img_id + 1]
         next_im_path = self.images_by_demo[demo_id][img_id + 1]
 
-        depth_path = current_im_path.replace("_color_", "_depth_")
-        raw_rgb = cv2.imread(current_im_path)
+        img_path = self.images_by_demo[demo_id][img_id]
+        depth_path = img_path.replace("_color_", "_depth_")
+        raw_rgb = cv2.imread(img_path)
         raw_depth = np.expand_dims(cv2.imread(depth_path, cv2.IMREAD_GRAYSCALE) , 2)
 
         if self.rgb_trans is not None:
@@ -60,14 +60,23 @@ class ImageRGBDPoseHist(Dataset):
             img_depth = raw_depth
 
         past_poses_np = get_pose_hist(past_im_paths, self.ee_name)
-        current_pose_np = get_pose_hist([current_im_path], self.ee_name)[0]
         next_pose_np = get_pose_hist([next_im_path], self.ee_name)[0]
 
-        past_poses = torch.from_numpy(past_poses_np).to(dtype=torch.float)
-        current_pose = torch.from_numpy(current_pose_np).to(dtype=torch.float)
-        next_pose = torch.from_numpy(next_pose_np).to(dtype=torch.float)
+        # Convert to roll-pitch-yaw and normalize between -1 and 1
+        next_pose_pos, next_pose_quat = next_pose_np[0:3], next_pose_np[3:]
+        next_pose_rpy = R.from_quat(next_pose_quat).as_euler("xyz") / np.pi
+        
+        past_poses_pos, past_poses_quat = past_poses_np[:, 0:3], past_poses_np[:, 3:]
+        past_poses_rpy = R.from_quat(past_poses_quat).as_euler("xyz") / np.pi
 
-        return img_rgb, img_depth, past_poses, current_pose, next_pose
+        next_pose_pos_rpy = np.concatenate((next_pose_pos, next_pose_rpy))
+        past_poses_pos_rpy = np.concatenate((past_poses_pos, past_poses_rpy), 1)
+        
+
+        past_poses = torch.from_numpy(past_poses_pos_rpy).to(dtype=torch.float)
+        next_pose = torch.from_numpy(next_pose_pos_rpy).to(dtype=torch.float)
+
+        return img_rgb, img_depth, past_poses, next_pose
 
 def get_pose_hist(img_paths, ee_name):
     folder_paths, img_names = zip(*[split(ip) for ip in img_paths])
