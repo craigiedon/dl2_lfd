@@ -65,6 +65,7 @@ def plot_csv_train_val(csv_path, save_path=None, show_fig=False):
         plt.plot(df[v_col], label=v_col)
         plt.xlabel("Epoch")
         plt.ylabel("Loss")
+        plt.ylim(top=0.1)
         plt.legend()
 
     if save_path is not None:
@@ -229,12 +230,13 @@ def chart_pred_pose(model_path, demo_path, demo_num):
 
 
     n_pose_dims, n_samples = next_pred_all.shape[0], next_pred_all.shape[1]
+    print(n_pose_dims)
     dim_names = ["p-x", "p-y", "p-z", "roll", "pitch", "yaw"]
     for dim_id in range(n_pose_dims):
         plt.subplot(ceil(n_pose_dims / 3.0), 3, dim_id + 1)
         plt.plot(next_pred_all[dim_id], label="Predicted Pose")
-        # plt.plot(current_pred_all[dim_id], label="Aux Prediction")
-        # plt.plot(current_targets_all[dim_id], label="Target Pose")
+        plt.plot(current_pred_all[dim_id], label="Aux Prediction")
+        plt.plot(current_targets_all[dim_id], label="Aux Target")
         plt.plot(next_targets_all[dim_id], label="Target Pose")
         plt.legend()
         plt.xlabel("t")

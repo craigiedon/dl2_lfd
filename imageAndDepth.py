@@ -26,8 +26,8 @@ def ZhangLoss():
         cos_sims = torch.clamp(F.cosine_similarity(next_pose_pred, target_pred), -1 + eps, 1 - eps)
         angle_loss = torch.acos(cos_sims).mean()
 
-        aux_loss = F.mse_loss(aux_pred, target_aux)
-        full_loss = 1e-2 * l2_loss + 1.0 * l1_loss + 5e-3 * angle_loss + 1e-2 * aux_loss
+        aux_loss = F.l1_loss(aux_pred, target_aux)
+        full_loss = 1e-2 * l2_loss + 1.0 * l1_loss + 5e-3 * angle_loss + 1.0 * aux_loss
         if math.isnan(full_loss):
             print("Nan Encountered")
 
@@ -64,7 +64,7 @@ if __name__ == "__main__":
 
     model = ZhangNet(im_params["resize_height"], im_params["resize_width"])
     model.to(torch.device("cuda"))
-    optimizer = optim.Adam(model.parameters(),weight_decay=1e-4)
+    optimizer = optim.Adam(model.parameters(), weight_decay=1e-4)
     loss_criterion = ZhangLoss()
 
     results_folder = "logs/zhang-{}".format(t_stamp())
