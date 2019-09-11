@@ -84,15 +84,6 @@ def open_loop_act(last_id, last_state, data_set, arm_publisher, joint_names):
     cv2.imshow('Input', cv2.cvtColor(nn_input_to_imshow(torch_im), cv2.COLOR_RGB2BGR))
     cv2.waitKey(100)
 
-
-    # (img, pos_normed), next_pos_normed = data_set[last_id]
-
-    # pos = unnorm_pose(pos_normed)
-    # next_pos = unnorm_pose(next_pos_normed)
-
-    # print("First data pos")
-    # print(pos)
-
     (img, pos), next_pos = data_set[last_id]
     data_pos_torch = torch.FloatTensor(pos)
     print("Raw pos {}".format(data_pos_torch))
@@ -142,20 +133,12 @@ class RobotStateCache(object):
         self.joint_pos = [j_pos[all_names.index(jn)] for jn in self.joint_names]
 
 
-def sanity_check():
-    if len(sys.argv) != 2:
-        print("Usage: python pr2Mover.py <model_path>")
-        sys.exit()
-
-    model_path = sys.argv[1]
+def reset_pose():
     rospy.init_node('pr2_mover', anonymous=True)
-    moveit_commander.roscpp_initialize(sys.argv)
     r = rospy.Rate(1)
 
     exp_config = byteify(load_json("config/experiment_config.json"))
 
-    pr2_left = setup_moveit_group("left_arm")
-    pr2_right = setup_moveit_group("right_arm")
 
     left_command = rospy.Publisher('/l_arm_controller/command', JointTrajectory, queue_size=10)
     right_command = rospy.Publisher('/r_arm_controller/command', JointTrajectory, queue_size=10)
@@ -170,74 +153,20 @@ def sanity_check():
         "r_wrist_flex_joint",
         "r_wrist_roll_joint"]
 
-
-    # device = torch.device("cpu")
-    # im_params = exp_config["image_config"]
-
-
-    # model = ResnetJointPredictor(im_params["resize_height"], im_params["resize_width"], len(exp_config["nn_joint_names"]))
-    # model.load_state_dict(torch.load(model_path, map_location=device))
-    # model.to(device)
-
-    # state_cache = RobotStateCache(exp_config["nn_joint_names"])
-    # image_sub = rospy.Subscriber('/kinect2/qhd/image_color_rect', Image, state_cache.update_img)
-    # joints_sub = rospy.Subscriber('/joint_states', JointState, state_cache.update_joint_pos)
-    # print("Subscribed")
-
-
-
-    # train_set, _ = load_demos(
-    #     exp_config["demo_folder"],
-    #     im_params["file_glob"],
-    #     exp_config["batch_size"],
-    #     exp_config["nn_joint_names"],
-    #     im_trans,
-    #     False,
-    #     device,
-    #     from_demo=0,
-    #     to_demo=1)
-
-    # print("Starting pos: {}".format(unnorm_pose(train_set[0][0][1])))
-
     left_start = [ 0.2242,  0.3300,  1.4105, -0.8090,  0.1163, -0.9732,  0.2731]
     right_start = [-0.7920,  0.5493, -1.1246, -1.0972, -0.8366, -1.0461, -0.0410]
 
-
-    r.sleep()
-    r.sleep()
-    r.sleep()
-    r.sleep()
-    r.sleep()
+    rospy.sleep(3)
     send_arm_goal(left_start, left_command, exp_config["nn_joint_names"])
     send_arm_goal(right_start, right_command, right_joints)
-    r.sleep()
-    r.sleep()
-    r.sleep()
-    r.sleep()
-
-
-    # ### Setup robot in initial pose using the moveit controllers
-    # right_success = move_to_position_rotation(pr2_right, [0.576, -0.462, 0.910], [-1.765, 0.082, 1.170])
-
-    # right = pr2_right.get_current_pose().pose
-    # left_pos = [right.position.x + 0.1, right.position.y + 0.49, right.position.z + 0.05]
-    # left_rpy = [math.pi/2.0, 0.0, -math.pi/2.0]
-
-
-    # print("Desired left: pos {}, rot {}".format(left_pos, left_rpy))
-    # left_success = move_to_position_rotation(pr2_left, left_pos, left_rpy)
-    # print("Left Success message: {}".format(left_success))
-    # print("Right Success message: {}".format(right_success))
-
+    rospy.sleep(3)
 
     print('Robot policy Prepared.')
     # model.eval()
-    while not rospy.is_shutdown():
-        print("step")
-        # act(state_cache, model, left_command, exp_config["nn_joint_names"])
-        r.sleep()
+    # while not rospy.is_shutdown():
+    #     r.sleep()
 
     print('Done.')
 
 if __name__ == '__main__':
-    sanity_check()
+    reset_pose()
