@@ -271,6 +271,24 @@ class ImageOnlyMDN(nn.Module):
         return mu, std, pi
 
 
+class PosePlusStateNet(nn.Module):
+    def __init__(self, hidden_dim):
+        super(PosePlusStateNet, self).__init__()
+        self.ff = nn.Sequential(
+            nn.Linear(12, hidden_dim),
+            nn.LeakyReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.LeakyReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.LeakyReLU(),
+            nn.Linear(hidden_dim, 6)
+        )
+
+    def forward(self, pose_ins, goal_ins):
+        output = self.ff(torch.cat((pose_ins, goal_ins), dim=1))
+        return output
+
+
 class JointsNet(nn.Module):
     def __init__(self, joint_dim):
         super(JointsNet, self).__init__()

@@ -11,6 +11,51 @@ from helper_funcs.utils import find_last
 from glob import glob
 from scipy.spatial.transform import Rotation as R
 
+class PoseAndGoal(Dataset):
+    def __init__(self, images_by_demo, active_ee_name, goal_ee_name, skip_count=5):
+        self.images_by_demo = images_by_demo
+        self.active_ee_name = active_ee_name
+        self.goal_ee_name = goal_ee_name
+
+        self.data_points = []
+        self.skip_count = skip_count
+
+        num_demos = len(images_by_demo)
+        for demo_id in range(num_demos):
+            for img_id in range(len(images_by_demo[demo_id]) - skip_count):
+                self.data_points.append(self.load_data_point(demo_id, img_id))
+
+    def __len__(self):
+        return len(self.data_points)
+
+    
+    def __getitem__(self, idx):
+        return self.data_points[idx]
+
+    def load_data_point(self, demo_id, img_id):
+        current_path = self.images_by_demo[demo_id][img_id]        
+        next_path = self.images_by_demo[demo_id][img_id + self.skip_count]
+
+        current_pose_q = get_pose(current_path, self.active_ee_name)
+        goal_pose_q = get_pose(current_path, self.goal_ee_name)
+        next_pose_q = get_pose(next_path, self.active_ee_name)
+
+        current_pose_rpy = quat_pose_to_rpy(current_pose_q)
+        goal_pose_rpy = quat_pose_to_rpy(goal_pose_q)
+        next_pose_rpy = quat_pose_to_rpy(next_pose_q)
+
+        current_pose = torch.from_numpy(current_pose_rpy).to(dtype=torch.float)
+        goal_pose = torch.from_numpy(goal_pose_rpy).to(dtype=torch.float)
+        next_pose = torch.from_numpy(next_pose_rpy).to(dtype=torch.float)
+
+        return current_pose, goal_pose, next_pose
+
+def quat_pose_to_rpy(quat_pose):
+    pos, quat = quat_pose[0:3], quat_pose[3:]
+    rpy = R.from_quat(quat).as_euler("xyz") / np.pi
+    return np.concatenate((pos, rpy))
+    
+
 class ImageRGBDPoseHist(Dataset):
 
     def __init__(self,
@@ -79,20 +124,20 @@ class ImageRGBDPoseHist(Dataset):
         return img_rgb, img_depth, past_poses, next_pose
 
 def get_pose_hist(img_paths, ee_name):
-    folder_paths, img_names = zip(*[split(ip) for ip in img_paths])
-    folder_path = folder_paths[0] # Assumption is that all images are in same folder...
+    return np.stack([get_pose(p, ee_name) for p in img_paths])
+
+def get_pose(img_path, ee_name):
+    folder_path, img_name = split(img_path)
     ts_reg = re.compile(r'.*_(\d+)\.jpg')
     repl_form = r'{}_\1.txt'.format(ee_name)
-    pose_paths = [join(folder_path, ts_reg.sub(repl_form, img_name)) for img_name in img_names]
-
-    poses = np.stack([np.genfromtxt(p) for p in pose_paths])
-    return poses
+    pose_path = join(folder_path, ts_reg.sub(repl_form, img_name))
+    return np.genfromtxt(pose_path)
 
 
-def image_demo_paths(demos_root, image_glob):
+def image_demo_paths(demos_root, image_glob, from_demo=None, to_demo=None, frame_limit=None):
     demo_paths = [join(demos_root, d) for d in sorted(os.listdir(demos_root))]
     demo_images = [sorted(glob(join(demo_path, image_glob))) for demo_path in demo_paths]
-    return demo_images
+    return [d[:frame_limit] for d in demo_images[from_demo:to_demo]]
 
 
 def load_demos(demos_folder, image_glob, batch_size, joint_names,
@@ -110,20 +155,19 @@ def load_demos(demos_folder, image_glob, batch_size, joint_names,
 
     return d_set, d_loader
 
-def load_rgbd_demos(demos_folder, image_glob, batch_size, ee_name,
-               rgb_trans, depth_trans, shuffled, device, from_demo=None, to_demo=None,
-               frame_limit=None):
-    demo_paths = image_demo_paths(demos_folder, image_glob)
-    print(demo_paths[from_demo][0])
-
-    demos = [d[0:frame_limit] for d in demo_paths[from_demo:to_demo]]
-    print("Demo Length - Raw: {}, Processed {}".format(len(demo_paths[from_demo]), [len(demos[0])]))
-
-
-    d_set = ImageRGBDPoseHist(demos, ee_name, rgb_trans, depth_trans)
+def load_rgbd_demos(demo_paths, batch_size, ee_name, rgb_trans, depth_trans, shuffled, device):
+    d_set = ImageRGBDPoseHist(demo_paths, ee_name, rgb_trans, depth_trans)
     d_loader = DeviceDataLoader(DataLoader(d_set, batch_size, shuffle=shuffled), device)
 
     return d_set, d_loader
+
+def load_pose_state_demos(demo_paths, batch_size, active_ee, goal_ee, shuffled, device):
+    print("Loading {} demo paths".format(len(demo_paths)))
+    d_set = PoseAndGoal(demo_paths, active_ee, goal_ee)
+    d_loader = DeviceDataLoader(DataLoader(d_set, batch_size, shuffle=shuffled), device)
+
+    return d_set, d_loader
+
 
 
 def load_constant_joint_vals(demos_root, constant_joint_names):

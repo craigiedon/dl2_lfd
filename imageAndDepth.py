@@ -15,7 +15,7 @@ from os.path import join
 import os
 import pandas as pd
 import numpy as np
-from load_data import load_rgbd_demos
+from load_data import load_rgbd_demos, image_demo_paths
 
 def ZhangLoss():
     def lf(next_pose_pred, aux_pred, target_pred, target_aux):
@@ -40,27 +40,22 @@ if __name__ == "__main__":
     exp_config = load_json("config/experiment_config.json")
     im_params = exp_config["image_config"]
     train_set, train_loader = load_rgbd_demos(
-        exp_config["demo_folder"],
-        im_params["file_glob"],
+        image_demo_paths(exp_config["demo_folder"], im_params["file_glob"], from_demo=0, to_demo=90)
         exp_config["batch_size"],
         "l_wrist_roll_link",
         get_trans(im_params, distorted=True),
         get_grayscale_trans(im_params),
         True,
-        torch.device("cuda"),
-        from_demo=0,
-        to_demo=90)
+        torch.device("cuda"))
 
     val_set, validation_loader = load_rgbd_demos(
-        exp_config["demo_folder"],
-        im_params["file_glob"],
+        image_demo_paths(exp_config["demo_folder"], im_params["file_glob"], from_demo=90)
         exp_config["batch_size"],
         "l_wrist_roll_link",
         get_trans(im_params, distorted=True),
         get_grayscale_trans(im_params),
         False,
-        torch.device("cuda"),
-        from_demo=90)
+        torch.device("cuda"))
 
     model = ZhangNet(im_params["resize_height"], im_params["resize_width"])
     model.to(torch.device("cuda"))

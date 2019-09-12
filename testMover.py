@@ -15,7 +15,7 @@ from load_data import load_rgbd_demos, nn_input_to_imshow
 from helper_funcs.transforms import get_trans, get_grayscale_trans
 from helper_funcs.utils import load_json
 import torch
-from model import ZhangNet
+from model import ZhangNet, PosePlusStateNet
 from cv_bridge import CvBridge
 import cv2
 from scipy.spatial.transform import Rotation as R
@@ -54,16 +54,28 @@ class RobotStateCache(object):
         self.depth_im = np.expand_dims(self.depth_im, 2)
         # print("min", np.min(self.depth_im), "max", np.max(self.depth_im))
 
-    
-    def update_pose_hist(self, pose_stamped):
+    def update_l_pose(self, pose_stamped):
         pos = pose_stamped.pose.position
         quat = pose_stamped.pose.orientation
         rpy = R.from_quat([quat.x, quat.y, quat.z, quat.w]).as_euler('xyz') / np.pi
+        self.l_pose = [pos.x, pos.y, pos.z, rpy[0], rpy[1], rpy[2]]
 
-        self.pose = [pos.x, pos.y, pos.z, rpy[0], rpy[1], rpy[2]]
 
-        self.last_quat = [quat.x, quat.y, quat.z, quat.w]
-        self.last_pos = [pos.x, pos.y, pos.z]
+    def update_r_pose(self, pose_stamped):
+        pos = pose_stamped.pose.position
+        quat = pose_stamped.pose.orientation
+        rpy = R.from_quat([quat.x, quat.y, quat.z, quat.w]).as_euler('xyz') / np.pi
+        self.r_pose = [pos.x, pos.y, pos.z, rpy[0], rpy[1], rpy[2]]
+    
+    # def update_pose_hist(self, pose_stamped):
+    #     pos = pose_stamped.pose.position
+    #     quat = pose_stamped.pose.orientation
+    #     rpy = R.from_quat([quat.x, quat.y, quat.z, quat.w]).as_euler('xyz') / np.pi
+
+    #     self.pose = [pos.x, pos.y, pos.z, rpy[0], rpy[1], rpy[2]]
+
+    #     self.last_quat = [quat.x, quat.y, quat.z, quat.w]
+    #     self.last_pos = [pos.x, pos.y, pos.z]
         # right_start_pos = np.array([0.576, -0.456, 0.86])
         # left_start_pos = right_start_pos + np.array([0.1, 0.49, 0.05])
 
@@ -76,29 +88,31 @@ def main(model_path):
     exp_config = load_json("config/experiment_config.json")
     im_params = exp_config["image_config"]
     device = torch.device("cpu")
-    rgb_trans = get_trans(im_params, distorted=False)
-    depth_trans = get_grayscale_trans(im_params)
+    # rgb_trans = get_trans(im_params, distorted=False)
+    # depth_trans = get_grayscale_trans(im_params)
 
-    train_set, train_loader = load_rgbd_demos(
-        exp_config["demo_folder"],
-        im_params["file_glob"],
-        exp_config["batch_size"],
-        "l_wrist_roll_link",
-        rgb_trans,
-        depth_trans,
-        True,
-        device,
-        from_demo=0,
-        to_demo=1)
+    # train_set, train_loader = load_rgbd_demos(
+    #     exp_config["demo_folder"],
+    #     im_params["file_glob"],
+    #     exp_config["batch_size"],
+    #     "l_wrist_roll_link",
+    #     rgb_trans,
+    #     depth_trans,
+    #     True,
+    #     device,
+    #     from_demo=0,
+    #     to_demo=1)
 
-    model = ZhangNet(im_params["resize_height"], im_params["resize_width"])
+    model = PosePlusStateNet(100)
     model.load_state_dict(torch.load(model_path, map_location=device))
     model.to(device)
+    model.eval() # Imporant if you have dropout / batchnorm layers!
 
     state_cache = RobotStateCache()
-    rgb_sub = rospy.Subscriber('/kinect2/qhd/image_color_rect', Image, state_cache.update_rgb_img)
-    depth_sub = rospy.Subscriber('/kinect2/qhd/image_depth_rect', Image, state_cache.update_depth_img)
-    joints_sub = rospy.Subscriber('/l_wrist_roll_link_as_posestamped', gm.PoseStamped, state_cache.update_pose_hist)
+    # rgb_sub = rospy.Subscriber('/kinect2/qhd/image_color_rect', Image, state_cache.update_rgb_img)
+    # depth_sub = rospy.Subscriber('/kinect2/qhd/image_depth_rect', Image, state_cache.update_depth_img)
+    l_pose_sub = rospy.Subscriber('/l_wrist_roll_link_as_posestamped', gm.PoseStamped, state_cache.update_l_pose)
+    r_pose_sub = rospy.Subscriber('/r_wrist_roll_link_as_posestamped', gm.PoseStamped, state_cache.update_r_pose)
     print("Subscribed")
 
 
@@ -148,47 +162,19 @@ def main(model_path):
     #     r.sleep()
 
     # Closed Loop
-    pose_history = deque(maxlen=5)
     while not rospy.is_shutdown():
         print("Step")
         if not state_cache.is_empty():
-            torch_rgb = rgb_trans(state_cache.rgb_im)
-            torch_depth = depth_trans(state_cache.depth_im)
-            pose_history.append(state_cache.pose)
-            # plt.show()
-            # print("Depth im:", torch_depth.squeeze())
-            # color_path = "demos/gear_good/demo_2019_06_26_15_58_59/kinect2_qhd_image_color_rect_1561561145828572837.jpg"
-            # sanity_im = rgb_trans(cv2.imread(color_path))
+            with torch.no_grad():
+                current_pose = torch.from_numpy(state_cache.l_pose).to(dtype=torch.float)
+                goal_pose = torch.from_numpy(state_cache.r_pose).to(dtype=torch.float)
 
-            # plt.subplot(1,2, 1)
-            # plt.imshow(nn_input_to_imshow(torch_rgb))
-            # plt.subplot(1,2,2)
-            # plt.imshow(nn_input_to_imshow(sanity_im))
-            # plt.show()
+                next_pose = model( current_pose.unsqueeze(0), goal_pose.unsqueeze(0))
+                next_position = next_pose[0][0:3].numpy().astype(np.float64)
+                next_rpy = next_pose[0][3:].numpy().astype(np.float64) * np.pi
+                next_quat = R.from_euler("xyz", next_rpy).as_quat()
 
-
-            if len(pose_history) == 5:
-                # Ready to go!
-                torch_pose_hist = torch.tensor(pose_history)
-                # print("Pose History: ", torch_pose_hist)
-                with torch.no_grad():
-                    # current_pose = torch_pose_hist[4]
-                    # current_position = current_pose[0:3].numpy().astype(np.float64)
-                    # current_rpy = current_pose[3:].numpy().astype(np.float64)
-                    # current_quat = R.from_euler('xyz', current_rpy * np.pi).as_quat()
-
-
-                    # print("Current pos: ", current_position)
-                    move_to_pos_quat(l_group, state_cache.last_pos, state_cache.last_quat)
-
-                    next_pose, _ = model(torch_rgb.unsqueeze(0), torch_depth.unsqueeze(0), torch_pose_hist.unsqueeze(0))
-                    next_position = next_pose[0][0:3].numpy().astype(np.float64)
-                    next_rpy = next_pose[0][3:].numpy().astype(np.float64) * np.pi
-                    next_quat = R.from_euler("xyz", next_rpy).as_quat()
-
-                    # print("Pred Pos: {}, Quat: {}".format(next_position, next_quat))
-                    move_to_pos_quat(l_group, next_position, next_quat)
-                    # move_to_pos_quat(l_group, next_position, current_quat)
+                move_to_pos_quat(l_group, next_position, next_quat)
         r.sleep()
 
 

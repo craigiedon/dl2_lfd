@@ -4,8 +4,8 @@ import matplotlib.patches as patches
 import matplotlib.animation as animation
 import sys
 from math import ceil
-from model import load_model, ImageOnlyMDN, ZhangNet
-from load_data import load_demos, load_rgbd_demos, nn_input_to_imshow, show_torched_im
+from model import load_model, ImageOnlyMDN, ZhangNet, PosePlusStateNet
+from load_data import load_demos, load_rgbd_demos, nn_input_to_imshow, show_torched_im, load_pose_state_demos, image_demo_paths
 import numpy as np
 import torch
 from helper_funcs.utils import zip_chunks, load_json, load_json_lines
@@ -180,6 +180,59 @@ def animate_spatial_features(model_path, demos_folder, demo_num):
     plt.show()
     return ani
             
+
+def chart_pred_goal_pose(model_path, demo_path, demo_num):
+    exp_config = load_json("config/experiment_config.json")
+    im_params = exp_config["image_config"]
+    _, demo_loader = load_pose_state_demos(
+        image_demo_paths(exp_config["demo_folder"], im_params["file_glob"], from_demo=demo_num, to_demo=demo_num + 1),
+        exp_config["batch_size"],
+        "l_wrist_roll_link",
+        "r_wrist_roll_link",
+        False,
+        torch.device("cuda"))
+
+    model = PosePlusStateNet(100)
+    model.load_state_dict(torch.load(model_path, map_location=torch.device("cuda")))
+    model.to(torch.device("cuda"))
+    model.eval()
+
+    next_pred_all, next_targets_all, current_pose_all = [], [], []
+
+    with torch.no_grad():
+        for ins in demo_loader:
+            current_pose, goal_pose, target_pose = ins 
+            next_pred = model(current_pose, goal_pose)
+            next_pred_all.append(next_pred)
+            next_targets_all.append(target_pose)
+            current_pose_all.append(current_pose)
+    
+    next_pred_all = torch.cat(next_pred_all)
+    next_targets_all = torch.cat(next_targets_all)
+    current_pose_all = torch.cat(current_pose_all)
+
+    # Shapes: N X 7
+
+    next_pred_all = next_pred_all.permute(1,0).cpu().numpy()
+    next_targets_all = next_targets_all.permute(1,0).cpu().numpy()
+    current_pose_all = current_pose_all.permute(1,0).cpu().numpy()
+
+
+    n_pose_dims, n_samples = next_pred_all.shape[0], next_pred_all.shape[1]
+    print(n_pose_dims)
+    dim_names = ["p-x", "p-y", "p-z", "roll", "pitch", "yaw"]
+    for dim_id in range(n_pose_dims):
+        plt.subplot(ceil(n_pose_dims / 3.0), 3, dim_id + 1)
+        plt.plot(next_pred_all[dim_id], label="Predicted Pose")
+        plt.plot(current_pose_all[dim_id], label="Current Pose")
+        # plt.plot(current_pred_all[dim_id], label="Aux Prediction")
+        plt.plot(next_targets_all[dim_id], label="Target Pose")
+        plt.legend()
+        plt.xlabel("t")
+        plt.ylabel(dim_names[dim_id])
+
+    plt.show()
+
 
 def chart_pred_pose(model_path, demo_path, demo_num):
     exp_config = load_json("config/experiment_config.json")
