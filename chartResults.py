@@ -181,6 +181,15 @@ def animate_spatial_features(model_path, demos_folder, demo_num):
     return ani
             
 
+def chart_all_poses(demo_path):
+    exp_config = load_json("config/experiment_config.json")
+    im_params = exp_config["image_config"]
+    demo_paths = image_demo_paths(exp_config["demo_folder"], im_params["file_glob"], from_demo=0, to_demo=10)
+    # For demo in the demo paths
+    for demo in image_demo_paths
+    # Load all of the poses into a list, reuse some load-data functions here
+    # chart in similar manner as before. Shape should be demos X demo_length X 6
+
 def chart_pred_goal_pose(model_path, demo_path, demo_num):
     exp_config = load_json("config/experiment_config.json")
     im_params = exp_config["image_config"]

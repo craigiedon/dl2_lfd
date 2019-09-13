@@ -40,11 +40,9 @@ class RobotStateCache(object):
         self.bridge = CvBridge()
         self.rgb_im = None
         self.depth_im = None
-        self.pose = None
+        self.l_pose = None
+        self.r_pose = None
 
-
-    def is_empty(self):
-        return self.rgb_im is None or self.depth_im is None or self.pose is None
 
     def update_rgb_img(self, img_msg):
         self.rgb_im = self.bridge.imgmsg_to_cv2(img_msg, "bgr8")
@@ -55,6 +53,7 @@ class RobotStateCache(object):
         # print("min", np.min(self.depth_im), "max", np.max(self.depth_im))
 
     def update_l_pose(self, pose_stamped):
+        print("Updating l pose!")
         pos = pose_stamped.pose.position
         quat = pose_stamped.pose.orientation
         rpy = R.from_quat([quat.x, quat.y, quat.z, quat.w]).as_euler('xyz') / np.pi
@@ -62,6 +61,7 @@ class RobotStateCache(object):
 
 
     def update_r_pose(self, pose_stamped):
+        print("Updating r pose!")
         pos = pose_stamped.pose.position
         quat = pose_stamped.pose.orientation
         rpy = R.from_quat([quat.x, quat.y, quat.z, quat.w]).as_euler('xyz') / np.pi
@@ -132,13 +132,13 @@ def main(model_path):
     # print(l_group.get_pose_reference_frame())
 
     r = rospy.Rate(3)
-    right_start_pos = np.array([0.576, -0.456, 0.86])
-    right_start_quat = np.array([-0.656, -0.407, 0.379, 0.510])
+    right_start_pos = np.array([0.57622, -0.45568, 0.85959])
+    right_start_quat = np.array([-0.6559, -0.4068, 0.3795, 0.5101])
 
-    left_start_pos = right_start_pos + np.array([0.1, 0.49, 0.05])
-    left_start_rpy = np.array([np.pi/2.0, 0.0, -np.pi/2.0])
+    left_start_pos = np.array([0.68368, 0.1201, 0.8733])
+    left_start_quat = np.array([0.49261, -0.5294, -0.4433, 0.529611])
 
-    move_to_pos_rpy(l_group, left_start_pos, left_start_rpy)
+    move_to_pos_quat(l_group, left_start_pos, left_start_quat)
     move_to_pos_quat(r_group, right_start_pos, right_start_quat)
 
     # Open Loop: Just replicating the training run
@@ -164,17 +164,17 @@ def main(model_path):
     # Closed Loop
     while not rospy.is_shutdown():
         print("Step")
-        if not state_cache.is_empty():
+        if state_cache.l_pose is not None and state_cache.r_pose is not None:
             with torch.no_grad():
-                current_pose = torch.from_numpy(state_cache.l_pose).to(dtype=torch.float)
-                goal_pose = torch.from_numpy(state_cache.r_pose).to(dtype=torch.float)
+                current_pose = torch.tensor(state_cache.l_pose, dtype=torch.float)
+                goal_pose = torch.tensor(state_cache.r_pose, dtype=torch.float)
 
                 next_pose = model( current_pose.unsqueeze(0), goal_pose.unsqueeze(0))
                 next_position = next_pose[0][0:3].numpy().astype(np.float64)
                 next_rpy = next_pose[0][3:].numpy().astype(np.float64) * np.pi
                 next_quat = R.from_euler("xyz", next_rpy).as_quat()
 
-                move_to_pos_quat(l_group, next_position, next_quat)
+                # move_to_pos_quat(l_group, next_position, next_quat)
         r.sleep()
 
 
