@@ -5,7 +5,7 @@ import matplotlib.animation as animation
 import sys
 from math import ceil
 from model import load_model, ImageOnlyMDN, ZhangNet, PosePlusStateNet
-from load_data import load_demos, load_rgbd_demos, nn_input_to_imshow, show_torched_im, load_pose_state_demos, image_demo_paths
+from load_data import load_demos, load_rgbd_demos, nn_input_to_imshow, show_torched_im, load_pose_state_demos, image_demo_paths, get_pose_hist, quat_pose_to_rpy
 import numpy as np
 import torch
 from helper_funcs.utils import zip_chunks, load_json, load_json_lines
@@ -184,11 +184,44 @@ def animate_spatial_features(model_path, demos_folder, demo_num):
 def chart_all_poses(demo_path):
     exp_config = load_json("config/experiment_config.json")
     im_params = exp_config["image_config"]
-    demo_paths = image_demo_paths(exp_config["demo_folder"], im_params["file_glob"], from_demo=0, to_demo=10)
-    # For demo in the demo paths
-    for demo in image_demo_paths
+    demo_paths = image_demo_paths(exp_config["demo_folder"], im_params["file_glob"], from_demo=0)
+
     # Load all of the poses into a list, reuse some load-data functions here
+    demo_trajectories = [get_pose_hist(d, "l_wrist_roll_link") for d in demo_paths]
+    demo_trajectories = [np.array([quat_pose_to_rpy(p) for p in dt]).transpose(1,0) for dt in demo_trajectories]
+
+    pose_dim_names = ["x", "y", "z", "r-x", "r-y", "r-z"]
+    for i in range(6):
+        plt.subplot(2,3, i + 1)
+        plt.xlabel("time")
+        plt.ylabel((pose_dim_names[i]))
+        for d in demo_trajectories:
+            plt.plot(d[i], alpha=0.15, color="green")
+
+
+    plt.show()
+        
     # chart in similar manner as before. Shape should be demos X demo_length X 6
+
+def chart_current_v_next(demo_path):
+    exp_config = load_json("config/experiment_config.json")
+    im_params = exp_config["image_config"]
+    demo_paths = image_demo_paths(exp_config["demo_folder"], im_params["file_glob"], from_demo=0)
+
+    # Load all of the poses into a list, reuse some load-data functions here
+    demo_trajectories = [get_pose_hist(d, "l_wrist_roll_link") for d in demo_paths]
+    demo_trajectories = [np.array([quat_pose_to_rpy(p) for p in dt]).transpose(1,0) for dt in demo_trajectories]
+
+    pose_dim_names = ["x", "y", "z", "r-x", "r-y", "r-z"]
+    for i in range(6):
+        plt.subplot(2,3, i + 1)
+        plt.xlabel("current {}".format(pose_dim_names[i]))
+        plt.ylabel("next {}".format(pose_dim_names[i]))
+        for d in demo_trajectories:
+            plt.scatter(d[i][0:-5], d[i][5:], alpha=0.05,s=10, color="blue")
+
+
+    plt.show()
 
 def chart_pred_goal_pose(model_path, demo_path, demo_num):
     exp_config = load_json("config/experiment_config.json")
@@ -360,23 +393,20 @@ def chart_demo_joint_trajectories(demo_path, demo_num):
 def chart_mdn_means(model_path, demo_path, demo_num):
     exp_config = load_json("config/experiment_config.json")
     im_params = exp_config["image_config"]
-    model = ImageOnlyMDN(im_params["resize_height"], im_params["resize_width"], len(exp_config["nn_joint_names"]), 5)
+
+    exp_config = load_json("config/experiment_config.json")
+    im_params = exp_config["image_config"]
+    _, demo_loader = load_pose_state_demos(
+        image_demo_paths(exp_config["demo_folder"], im_params["file_glob"], from_demo=demo_num, to_demo=demo_num + 1),
+        exp_config["batch_size"],
+        "l_wrist_roll_link",
+        "r_wrist_roll_link",
+        False,
+        torch.device("cuda"))
+
+    model = PosePlusStateNet(100, 2)
     model.load_state_dict(torch.load(model_path, map_location=torch.device("cuda")))
     model.to(torch.device("cuda"))
-
-    demo_set, demo_loader = load_demos(
-        demo_path,
-        im_params["file_glob"],
-        exp_config["batch_size"],
-        exp_config["nn_joint_names"],
-        get_trans(im_params),
-        False,
-        torch.device("cuda"),
-        from_demo=demo_num,
-        to_demo=demo_num + 1,
-        skip_count=5
-    )
-
     model.eval()
     mu_all = []
     std_all = []
@@ -384,10 +414,10 @@ def chart_mdn_means(model_path, demo_path, demo_num):
     targets_all = []
 
     with torch.no_grad():
-        for (ins, targets) in demo_loader:
-            img_ins, current_pos = ins
-            mus, stds, pis = model(img_ins)
-            # print("St-dev:", stds)
+        for ins in demo_loader:
+            current_pose, goal_pose, targets = ins
+            pis, stds, mus = model(current_pose, goal_pose)
+            print("mu {} std {} pis {}".format(mus.shape, stds.shape, pis.shape))
             mu_all.append(mus)
             std_all.append(stds)
             pis_all.append(pis)
@@ -403,7 +433,7 @@ def chart_mdn_means(model_path, demo_path, demo_num):
 
     # I want : mu: 7 X 5 X N, std: 5 X N, pis: 5 X N, targets_all: 7 * N
     mu_all = mu_all.permute(2,1,0).cpu().numpy()
-    std_all = std_all.permute(1,0).cpu().numpy()
+    std_all = std_all.permute(2,1,0).cpu().numpy()
     pis_all = pis_all.permute(1,0).cpu().numpy()
     targets_all = targets_all.permute(1,0).cpu().numpy()
 
@@ -415,25 +445,26 @@ def chart_mdn_means(model_path, demo_path, demo_num):
     print("STD example", std_all[0][0])
 
     n_joints, n_components, n_samples = mu_all.shape[0], mu_all.shape[1], mu_all.shape[2]
+    print("joints {} components {} samples {}".format(n_joints, n_components, n_samples))
     for joint_id in range(n_joints):
-        plt.subplot(ceil(n_joints / 3.0), 3, joint_id + 1)
+        plt.subplot(ceil(n_joints / 3.0), 4, joint_id + 1)
         for pi_id in range(n_components):
             plt.plot(mu_all[joint_id, pi_id], label="pi-{}".format(pi_id))
-            plt.fill_between(range(n_samples), mu_all[joint_id, pi_id] - std_all[pi_id], mu_all[joint_id, pi_id] + std_all[pi_id], alpha=0.1)
+            plt.fill_between(range(n_samples), mu_all[joint_id, pi_id] - std_all[joint_id, pi_id], mu_all[joint_id, pi_id] + std_all[joint_id, pi_id], alpha=0.1)
 
 
         weighted_mus = mu_all[joint_id] * pis_all
-        averaged_mus = weighted_mus.mean(0)
+        averaged_mus = weighted_mus.sum(0)
         print("muall: {}, pis_all: {} Weighted: {}, Averaged: {}".format(mu_all.shape, pis_all.shape, weighted_mus.shape, averaged_mus.shape))
         plt.plot(averaged_mus, label="Averaged")
         plt.plot(targets_all[joint_id], label="Targets")
 
         plt.legend()
-        plt.title(exp_config["nn_joint_names"][joint_id])
+        plt.title(["x", "y", "z", "r-x", "r-y", "r-z"][joint_id])
         plt.xlabel("t")
         plt.ylabel("Normed Radians")
 
-    plt.subplot(ceil(n_joints / 3.0), 3, n_joints + 1)
+    plt.subplot(ceil(n_joints / 3.0), 4, n_joints + 1)
     for pi_id in range(n_components):
         plt.plot(pis_all[pi_id], label="pi_{}".format(pi_id))
     plt.legend()

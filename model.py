@@ -272,7 +272,7 @@ class ImageOnlyMDN(nn.Module):
 
 
 class PosePlusStateNet(nn.Module):
-    def __init__(self, hidden_dim):
+    def __init__(self, hidden_dim, mix_num):
         super(PosePlusStateNet, self).__init__()
         self.ff = nn.Sequential(
             nn.Linear(12, hidden_dim),
@@ -281,7 +281,7 @@ class PosePlusStateNet(nn.Module):
             nn.LeakyReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.LeakyReLU(),
-            nn.Linear(hidden_dim, 6)
+            MDN(hidden_dim, 6, mix_num)
         )
 
     def forward(self, pose_ins, goal_ins):
