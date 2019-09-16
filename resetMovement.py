@@ -7,11 +7,9 @@ import numpy as np
 import cv2
 import geometry_msgs
 
-from model import load_model, ImageOnlyNet
 from load_data import cv_to_nn_input, nn_input_to_imshow, load_demos, unnorm_pose, wrap_pose
 from torchvision.transforms import Compose, Normalize
 from helper_funcs.utils import load_json, byteify
-from frozenResnetTrainer import ResnetJointPredictor
 # from helper_funcs.transforms import get_trans
 # from autoencoder import EncodeDecodePredictor
 
