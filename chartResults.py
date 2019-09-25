@@ -2,12 +2,14 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import matplotlib.animation as animation
+from mpl_toolkits.mplot3d import Axes3D
 import sys
 from math import ceil
-from model import load_model, ImageOnlyMDN, ZhangNet, PosePlusStateNet
-from load_data import load_demos, load_rgbd_demos, nn_input_to_imshow, show_torched_im, load_pose_state_demos, image_demo_paths, get_pose_hist, quat_pose_to_rpy
+from model import load_model, ImageOnlyMDN, ZhangNet, PosePlusStateNet, ImageOnlyNet
+from load_data import load_demos, load_rgbd_demos, nn_input_to_imshow, show_torched_im, load_pose_state_demos, image_demo_paths, get_pose_hist, quat_pose_to_rpy, ImageRGBDPoseHist, DeviceDataLoader, ImagePoseFuturePose, PoseAndGoal
 import numpy as np
 import torch
+from torch.utils.data import DataLoader
 from helper_funcs.utils import zip_chunks, load_json, load_json_lines
 
 # from torchvision.transforms import Compose
@@ -60,7 +62,9 @@ def plot_csv_train_val(csv_path, save_path=None, show_fig=False):
     train_cols = [c for c in df.columns if c.startswith("T")]
     val_cols = [c for c in df.columns if c.startswith("V")]
     for i, (t_col, v_col) in enumerate(zip(train_cols, val_cols)):
-        plt.subplot(ceil(len(train_cols) / 3), 3, i + 1)
+        n_rows = ceil(len(train_cols) / 3)
+        n_cols = np.min([len(train_cols), 3])
+        plt.subplot(n_rows, n_cols, i + 1)
         plt.plot(df[t_col], label=t_col)
         plt.plot(df[v_col], label=v_col)
         plt.xlabel("Epoch")
@@ -181,6 +185,30 @@ def animate_spatial_features(model_path, demos_folder, demo_num):
     return ani
             
 
+def chart_all_poses_3d(demo_path):
+    exp_config = load_json("config/experiment_config.json")
+    im_params = exp_config["image_config"]
+    demo_paths = image_demo_paths(exp_config["demo_folder"], im_params["file_glob"], from_demo=0, to_demo=5)
+
+    # Load all of the poses into a list, reuse some load-data functions here
+    demo_trajectories = [get_pose_hist(d, "l_wrist_roll_link") for d in demo_paths]
+    demo_trajectories = [np.array([quat_pose_to_rpy(p) for p in dt]).transpose(1,0) for dt in demo_trajectories]
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
+    ax.set_zlabel("t")
+
+    for d in demo_trajectories:
+        time = np.linspace(0, 1, len(d[2]))
+        ax.scatter(d[0], d[1], time)
+
+    plt.show()
+
+    # pose_dim_names = ["x", "y", "z", "r-x", "r-y", "r-z"]
+    #     plt.plot(d[i], alpha=0.15, color="green")
+
 def chart_all_poses(demo_path):
     exp_config = load_json("config/experiment_config.json")
     im_params = exp_config["image_config"]
@@ -206,7 +234,7 @@ def chart_all_poses(demo_path):
 def chart_current_v_next(demo_path):
     exp_config = load_json("config/experiment_config.json")
     im_params = exp_config["image_config"]
-    demo_paths = image_demo_paths(exp_config["demo_folder"], im_params["file_glob"], from_demo=0)
+    demo_paths = image_demo_paths(exp_config["demo_folder"], im_params["file_glob"], from_demo=0, to_demo=1)
 
     # Load all of the poses into a list, reuse some load-data functions here
     demo_trajectories = [get_pose_hist(d, "l_wrist_roll_link") for d in demo_paths]
@@ -226,13 +254,10 @@ def chart_current_v_next(demo_path):
 def chart_pred_goal_pose(model_path, demo_path, demo_num):
     exp_config = load_json("config/experiment_config.json")
     im_params = exp_config["image_config"]
-    _, demo_loader = load_pose_state_demos(
-        image_demo_paths(exp_config["demo_folder"], im_params["file_glob"], from_demo=demo_num, to_demo=demo_num + 1),
-        exp_config["batch_size"],
-        "l_wrist_roll_link",
-        "r_wrist_roll_link",
-        False,
-        torch.device("cuda"))
+
+    train_paths = image_demo_paths(exp_config["demo_folder"], im_params["file_glob"], from_demo=demo_num, to_demo=demo_num + 1)
+    train_set = PoseAndGoal(train_paths, "l_wrist_roll_link", "r_wrist_roll_link", skip_count=10)
+    demo_loader = DeviceDataLoader(DataLoader(train_set, exp_config["batch_size"], shuffle=False), torch.device("cuda"))
 
     model = PosePlusStateNet(100)
     model.load_state_dict(torch.load(model_path, map_location=torch.device("cuda")))
@@ -280,46 +305,38 @@ def chart_pred_pose(model_path, demo_path, demo_num):
     exp_config = load_json("config/experiment_config.json")
     im_params = exp_config["image_config"]
 
-    _, demo_loader = load_rgbd_demos(
-        demo_path,
-        im_params["file_glob"],
-        exp_config["batch_size"],
-        "l_wrist_roll_link",
-        get_trans(im_params, distorted=True),
-        get_grayscale_trans(im_params),
-        False,
-        torch.device("cuda"),
-        from_demo=demo_num,
-        to_demo=demo_num + 1)
+    train_paths = image_demo_paths(exp_config["demo_folder"], im_params["file_glob"], from_demo=demo_num, to_demo=demo_num + 1)
+    train_set = ImagePoseFuturePose(train_paths, "l_wrist_roll_link", get_trans(im_params, distorted=True), 10)
+    demo_loader = DeviceDataLoader(DataLoader(train_set, exp_config["batch_size"], shuffle=False), torch.device("cuda"))
 
-    model = ZhangNet(im_params["resize_height"], im_params["resize_width"])
+    model = ImageOnlyNet(im_params["resize_height"], im_params["resize_width"], 6)
     model.load_state_dict(torch.load(model_path, map_location=torch.device("cuda")))
     model.to(torch.device("cuda"))
 
     model.eval()
     next_pred_all = []
-    current_pred_all = []
+    # current_pred_all = []
     current_targets_all = []
     next_targets_all = []
 
     with torch.no_grad():
         for ins in demo_loader:
-            rgb_ins, depth_ins, past_ins, target_ins = ins 
-            next_pred, current_pred = model(rgb_ins, depth_ins, past_ins)
+            rgb_ins, current_ins, target_ins = ins 
+            next_pred = model(rgb_ins)
             next_pred_all.append(next_pred)
-            current_pred_all.append(current_pred)
-            current_targets_all.append(past_ins[:, 4])
+            # current_pred_all.append(current_pred)
+            current_targets_all.append(current_ins)
             next_targets_all.append(target_ins)
     
     next_pred_all = torch.cat(next_pred_all)
-    current_pred_all = torch.cat(current_pred_all)
+    # current_pred_all = torch.cat(current_pred_all)
     current_targets_all = torch.cat(current_targets_all)
     next_targets_all = torch.cat(next_targets_all)
 
     # Shapes: N X 7
 
     next_pred_all = next_pred_all.permute(1,0).cpu().numpy()
-    current_pred_all = current_pred_all.permute(1,0).cpu().numpy()
+    # current_pred_all = current_pred_all.permute(1,0).cpu().numpy()
     current_targets_all = current_targets_all.permute(1,0).cpu().numpy()
     next_targets_all = next_targets_all.permute(1,0).cpu().numpy()
 
@@ -330,8 +347,8 @@ def chart_pred_pose(model_path, demo_path, demo_num):
     for dim_id in range(n_pose_dims):
         plt.subplot(ceil(n_pose_dims / 3.0), 3, dim_id + 1)
         plt.plot(next_pred_all[dim_id], label="Predicted Pose")
-        plt.plot(current_pred_all[dim_id], label="Aux Prediction")
-        plt.plot(current_targets_all[dim_id], label="Aux Target")
+        # plt.plot(current_pred_all[dim_id], label="Aux Prediction")
+        plt.plot(current_targets_all[dim_id], label="Current Pose")
         plt.plot(next_targets_all[dim_id], label="Target Pose")
         plt.legend()
         plt.xlabel("t")
@@ -390,6 +407,86 @@ def chart_demo_joint_trajectories(demo_path, demo_num):
     
     plt.show()
 
+def chart_mdn_means_image(model_path, demo_path, demo_num):
+    exp_config = load_json("config/experiment_config.json")
+    im_params = exp_config["image_config"]
+
+    exp_config = load_json("config/experiment_config.json")
+    im_params = exp_config["image_config"]
+
+    train_paths = image_demo_paths(exp_config["demo_folder"], im_params["file_glob"], from_demo=demo_num, to_demo=demo_num + 1)
+    train_set = ImageRGBDPoseHist(train_paths, "l_wrist_roll_link", get_trans(im_params, distorted=True), get_grayscale_trans(im_params))
+    demo_loader = DeviceDataLoader(DataLoader(train_set, exp_config["batch_size"], shuffle=False), torch.device("cuda"))
+
+    model = ImageOnlyMDN(im_params["resize_height"], im_params["resize_width"], 6, 5)
+    model.load_state_dict(torch.load(model_path, map_location=torch.device("cuda")))
+    model.to(torch.device("cuda"))
+    model.eval()
+    mu_all = []
+    std_all = []
+    pis_all = []
+    targets_all = []
+
+    with torch.no_grad():
+        for ins in demo_loader:
+            rgb_in, depth_in, pose_hist, targets = ins
+            pis, stds, mus = model(rgb_in)
+            print("mu {} std {} pis {}".format(mus.shape, stds.shape, pis.shape))
+            mu_all.append(mus)
+            std_all.append(stds)
+            pis_all.append(pis)
+            targets_all.append(targets)
+    
+    mu_all = torch.cat(mu_all)
+    std_all = torch.cat(std_all)
+    pis_all = torch.cat(pis_all)
+    targets_all = torch.cat(targets_all)
+
+    # Im expecting: mu: N x 5 X 7, std: N x 5, pis: N * 5, targets_all: N * 7
+    # print("Shapes: mu: {}, std: {}, pis {}, targets{}".format(mu_all.shape, std_all.shape, pis_all.shape, targets_all.shape))
+
+    # I want : mu: 7 X 5 X N, std: 5 X N, pis: 5 X N, targets_all: 7 * N
+    mu_all = mu_all.permute(2,1,0).cpu().numpy()
+    std_all = std_all.permute(2,1,0).cpu().numpy()
+    pis_all = pis_all.permute(1,0).cpu().numpy()
+    targets_all = targets_all.permute(1,0).cpu().numpy()
+
+    print("Shapes: mu: {}, std: {}, pis {}, targets{}".format(mu_all.shape, std_all.shape, pis_all.shape, targets_all.shape))
+
+
+    fig = plt.figure()
+
+    print("STD example", std_all[0][0])
+
+    n_joints, n_components, n_samples = mu_all.shape[0], mu_all.shape[1], mu_all.shape[2]
+    print("joints {} components {} samples {}".format(n_joints, n_components, n_samples))
+    for joint_id in range(n_joints):
+        plt.subplot(ceil(n_joints / 3.0), 4, joint_id + 1)
+        for pi_id in range(n_components):
+            plt.plot(mu_all[joint_id, pi_id], label="pi-{}".format(pi_id))
+            plt.fill_between(range(n_samples), mu_all[joint_id, pi_id] - std_all[joint_id, pi_id], mu_all[joint_id, pi_id] + std_all[joint_id, pi_id], alpha=0.1)
+
+
+        weighted_mus = mu_all[joint_id] * pis_all
+        averaged_mus = weighted_mus.sum(0)
+        print("muall: {}, pis_all: {} Weighted: {}, Averaged: {}".format(mu_all.shape, pis_all.shape, weighted_mus.shape, averaged_mus.shape))
+        plt.plot(averaged_mus, label="Averaged")
+        plt.plot(targets_all[joint_id], label="Targets")
+
+        plt.legend()
+        plt.title(["x", "y", "z", "r-x", "r-y", "r-z"][joint_id])
+        plt.xlabel("t")
+        plt.ylabel("Normed Radians")
+
+    plt.subplot(ceil(n_joints / 3.0), 4, n_joints + 1)
+    for pi_id in range(n_components):
+        plt.plot(pis_all[pi_id], label="pi_{}".format(pi_id))
+    plt.legend()
+    plt.xlabel("t")
+    plt.ylabel("Component Weight")
+    plt.title("Pis")
+
+    plt.show()
 def chart_mdn_means(model_path, demo_path, demo_num):
     exp_config = load_json("config/experiment_config.json")
     im_params = exp_config["image_config"]

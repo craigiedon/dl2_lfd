@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 
 class Box:
 
@@ -8,13 +9,14 @@ class Box:
         self.name = 'box'
 
     def is_empty(self):
-        return np.any(self.a > self.b)
+        return torch.any(self.a > self.b)
         
     def project(self, x):
-        return np.clip(x, self.a, self.b)
+        return torch.min(torch.max(x, self.a), self.b)
 
     def sample(self):
-        return (self.b - self.a) * np.random.random_sample(size=self.a.shape) + self.a
+        s = (self.b - self.a) * torch.rand_like(self.a) + self.a
+        return s
 
 class Segment:
 

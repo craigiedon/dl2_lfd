@@ -11,6 +11,57 @@ from helper_funcs.utils import find_last
 from glob import glob
 from scipy.spatial.transform import Rotation as R
 
+class ImagePoseFuturePose(Dataset):
+
+    def __init__(self,
+                 images_by_demo,
+                 ee_name,
+                 rgb_trans=None,
+                 skip_count=1):
+        # self.images_by_demo = images_by_demo
+        self.images_by_demo = images_by_demo
+        self.ee_name = ee_name
+        self.rgb_trans = rgb_trans
+        self.skip_count = skip_count
+
+        print("Loading {} files".format(len(self.images_by_demo)))
+
+        # We don't want the final image, because we need to predict future
+        # And we dont want first 4, because we are using past history as an input
+        self.data_points = []
+        for demo_id in range(len(images_by_demo)):
+            for img_id in range(0, len(images_by_demo[demo_id]) - skip_count):
+                self.data_points.append(self.load_data_point(demo_id, img_id))
+
+    def __len__(self):
+        return len(self.data_points)
+
+    def __getitem__(self, idx):
+        return self.data_points[idx]
+
+    def load_data_point(self, demo_id, img_id):
+
+        current_path = self.images_by_demo[demo_id][img_id]
+        next_path = self.images_by_demo[demo_id][img_id + self.skip_count]
+
+        raw_rgb = cv2.imread(current_path)
+
+        if self.rgb_trans is not None:
+            img_rgb = self.rgb_trans(raw_rgb)
+        else:
+            img_rgb = raw_rgb
+
+        current_pose_q = get_pose(current_path, self.ee_name)
+        next_pose_q = get_pose(next_path, self.ee_name)
+
+        current_pose_rpy = quat_pose_to_rpy(current_pose_q)
+        next_pose_rpy = quat_pose_to_rpy(next_pose_q)
+
+        current_pose = torch.from_numpy(current_pose_rpy).to(dtype=torch.float)
+        next_pose = torch.from_numpy(next_pose_rpy).to(dtype=torch.float)
+
+        return img_rgb, current_pose, next_pose
+
 class PoseAndGoal(Dataset):
     def __init__(self, images_by_demo, active_ee_name, goal_ee_name, skip_count=5):
         self.images_by_demo = images_by_demo
@@ -242,7 +293,7 @@ def send_to_device_rec(xs, device):
     return [send_to_device_rec(x,device) for x in xs]
 
 
-class PoseControlDataset(Dataset):
+class JointsControlDataset(Dataset):
     def __init__(self, images_by_demo, arm_joint_names):
         self.images_by_demo = images_by_demo
         self.arm_joint_names = arm_joint_names
@@ -301,7 +352,7 @@ class ImagePoseControlDataset(Dataset):
         img = torch.from_numpy(np_img.transpose(2, 0, 1)).to(dtype=torch.float)
 
         # Normalize joint angles by encoding with sin/cos
-        wrapped_pose = wrap_pose(np_pose)
+        wrapped_pose = wrap_unbounded_rads(np_pose)
         pose = torch.from_numpy(wrapped_pose).to(dtype=torch.float)
 
 
@@ -349,17 +400,17 @@ class ImagePoseFuturePoseDataSet(Dataset):
             transformed_im = self.im_transform(raw_img)
 
         # Normalize joint angles by encoding with sin/cos
-        wrapped_pose = wrap_pose(np_pose)
+        wrapped_pose = wrap_unbounded_rads(np_pose)
         pose = torch.from_numpy(wrapped_pose).to(dtype=torch.float)
         # pose = torch.from_numpy(np_pose).to(dtype=torch.float)
 
-        wrapped_next_pose = wrap_pose(np_next_pose)
+        wrapped_next_pose = wrap_unbounded_rads(np_next_pose)
         next_pose = torch.from_numpy(wrapped_next_pose).to(dtype=torch.float)
         # next_pose = torch.from_numpy(np_next_pose).to(dtype=torch.float)
 
         return ((transformed_im, pose), next_pose) # {"raw_image":raw_img, "image": img, "pose": pose, "control": control}
 
-def wrap_pose(unbounded_rads):
+def wrap_unbounded_rads(unbounded_rads):
     pi_bounded_rads = np.arctan2(np.sin(unbounded_rads), np.cos(unbounded_rads)) # bound between [-pi, pi]
     return (pi_bounded_rads + np.pi) / (np.pi * 2.0) # bound between [0, 1]
 

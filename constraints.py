@@ -12,40 +12,30 @@ def kl(p, log_q):
     return torch.sum(-p * log_q + p * torch.log(p), dim=1)
 
 
-class Constraint:
-
-    def eval_z(self, z_batches):
-        if self.use_cuda:
-            z_inputs = [torch.cuda.FloatTensor(z_batch) for z_batch in z_batches]
-        else:
-            z_inputs = [torch.FloatTensor(z_batch) for z_batch in z_batches]
-
-        for z_input in z_inputs:
-            z_input.requires_grad_(True)
-        z_outputs = [self.net(z_input) for z_input in z_inputs]
-        for z_out in z_outputs:
-            z_out.requires_grad_(True)
-        return z_inputs, z_outputs
-
-    def get_condition(self, z_inp, z_out, x_batches, y_batches):
-        assert False
-
-    def loss(self, x_batches, y_batches, z_batches, args):
-        if z_batches is not None:
-            z_inp, z_out = self.eval_z(z_batches)
-        else:
-            z_inp, z_out = None, None
-
-        constr = self.get_condition(z_inp, z_out, x_batches, y_batches)
+def constraint_loss(constraint, in_batch, target_batch, z_batch):
+    constr = constraint.get_condition(z_batch, in_batch, target_batch)
+    
+    neg_losses = dl2.Negate(constr).loss()
+    pos_losses = constr.loss()
+    sat = constr.satisfy()
         
-        neg_losses = dl2.Negate(constr).loss()
-        pos_losses = constr.loss()
-        sat = constr.satisfy()
+    return neg_losses, pos_losses, sat, z_batch
+
+# class Constraint:
+#     def get_condition(self, z_inp, z_out, x_batches, y_batches):
+#         assert False
+
+#     def loss(self, x_batches, y_batches, z_batches):
+#         constr = self.get_condition(z_batches, x_batches, y_batches)
+        
+#         neg_losses = dl2.Negate(constr).loss()
+#         pos_losses = constr.loss()
+#         sat = constr.satisfy()
             
-        return neg_losses, pos_losses, sat, z_inp
+#         return neg_losses, pos_losses, sat, z_inp
 
 
-class JointLimitsConstraint(Constraint):
+class JointLimitsConstraint():
     def __init__(self, net, lower_bounds, upper_bounds, dt=0.05, use_cuda=True):
         self.net = net
         self.lower_bounds = lower_bounds
@@ -84,7 +74,7 @@ class JointLimitsConstraint(Constraint):
         return [[Box(self.lower_bounds, self.upper_bounds) for i in range(n_batch)]]
 
 
-class EndEffectorPosConstraint(Constraint):
+class EndEffectorPosConstraint():
     def __init__(self, net, min_y, joint_param_names, robot_model, eps=1e-3, dt=0.05, use_cuda=True):
         self.net = net
         self.use_cuda = use_cuda
@@ -115,92 +105,81 @@ class EndEffectorPosConstraint(Constraint):
     def get_domains(self, x_batches, y_batches):
         assert len(x_batches) == 2
         _, pose_ins = x_batches
-        return [[Box(pose_ins[i] - self.eps, pose_ins[i] + self.eps)] for i in range(len(pose_ins))]
+        return ([Box(pose_ins[i] - self.eps, pose_ins[i] + self.eps) for i in range(len(pose_ins))])
 
 
-class StayInZone(Constraint):
-    def __init__(self, net, min_bounds, max_bounds, joint_param_names, robot_model, eps=1e-3, dt=0.05, use_cuda=True):
+
+class StayInZone():
+    def __init__(self, net, min_bounds, max_bounds):
         self.net = net
-        self.use_cuda = use_cuda
-        self.name = 'stay in zone'
-        self.robot_model = robot_model
-        self.joint_param_names = joint_param_names
-
-        self.eps = eps
-        self.dt = dt # TODO: Switch to positional movement?
-        self.n_gvars = 1 ## TODO: Is this what we want for this?
-
+        self.n_gvars = 1
 
         assert len(min_bounds) == len(max_bounds) == 3 # Bounds should be (x,y,z) coords
-        self.min_vec = min_bounds
-        self.max_vec = max_bounds
-
-    def params(self):
-        return {"min_bounds": self.min_bounds,
-                "max_bounds": self.max_bounds
-                }
+        self.min_bounds = min_bounds
+        self.max_bounds = max_bounds
 
         
-    def get_condition(self, z_inp, z_out, input_batches, target_batches): 
+    def get_condition(self, z_batches, input_batches, target_batches): 
         assert len(input_batches) == 2 # Should be passing in an (img_batch, pose_batch) pair here
-        _, pose_ins = input_batches
-        est_vels = self.net(*input_batches)
-
-        next_pose_ests = pose_ins + self.dt * est_vels
-        end_effector_positions = torch.FloatTensor([forward_kinematics(np_est, self.joint_param_names, self.robot_model) for np_est in next_pose_ests])
+        _, goal_poses = input_batches
+        next_pred = self.net(*z_batches, goal_poses)
         
         return dl2.And([
-            dl2.GEQ(end_effector_positions[:,0], self.min_bounds[0]),
-            dl2.GEQ(end_effector_positions[:,1], self.min_bounds[1]),
-            dl2.GEQ(end_effector_positions[:,2], self.min_bounds[2]),
-            dl2.LEQ(end_effector_positions[:,0], self.max_bounds[0]),
-            dl2.LEQ(end_effector_positions[:,1], self.max_bounds[1]),
-            dl2.LEQ(end_effector_positions[:,2], self.max_bounds[2]),
+            dl2.GEQ(next_pred[:,0], self.min_bounds[0]),
+            dl2.GEQ(next_pred[:,1], self.min_bounds[1]),
+            dl2.GEQ(next_pred[:,2], self.min_bounds[2]),
+            dl2.LEQ(next_pred[:,0], self.max_bounds[0]),
+            dl2.LEQ(next_pred[:,1], self.max_bounds[1]),
+            dl2.LEQ(next_pred[:,2], self.max_bounds[2]),
         ])
 
 
     def get_domains(self, x_batches, y_batches):
         assert len(x_batches) == 2
-        _, pose_ins = x_batches
-        # TODO: Perhaps the domain for this could actually be everything within the bounds
-        return [[Box(pose_ins[i] - self.eps, pose_ins[i] + self.eps)] for i in range(len(pose_ins))]
+        current_poses, _ = x_batches
+
+        b_mins = current_poses.clone()
+        b_mins[:, 0:3] = self.min_bounds
+
+        b_maxes = current_poses.clone()
+        b_maxes[:, 0:3] = self.max_bounds
+
+        return [Box(b_mins, b_maxes)]
 
 
-class MoveSlowly(Constraint):
-    def __init__(self, net, speed_limit, joint_param_names, robot_model, eps=1e-3, dt=0.05, use_cuda=True):
+class MoveSlowly():
+    def __init__(self, net, speed_limit, eps=0.2):
         self.net = net
-        self.use_cuda = use_cuda
-        self.name = 'move slowly'
-        self.robot_model = robot_model
-        self.joint_param_names = joint_param_names
 
         self.eps = eps
-        self.dt = dt
         self.n_gvars = 1
 
         self.speed_limit = speed_limit
 
-    def params(self):
-        return {"speed_limit": self.speed_limit}
 
-        
-    def get_condition(self, z_inp, z_out, input_batches, target_batches): 
+    def get_condition(self, z_batches, input_batches, target_batches): 
         assert len(input_batches) == 2 # Should be passing in an (img_batch, pose_batch) pair here
-        est_vels = self.net(*input_batches)
+        _, goal_poses = input_batches
 
-        velocity_displacements = self.dt * est_vels
-        ee_disp = torch.FloatTensor([forward_kinematics(v_dis, self.joint_param_names, self.robot_model) for v_dis in velocity_displacements])
+        z_current_pose = z_batches[0]
+        next_pred = self.net(*z_batches, goal_poses)
+
+        # Just get the euclidean distance between positions, not rotations
+        inst_velocities = F.pairwise_distance(z_current_pose[:, 0:3], next_pred[:, 0:3])
         
-        return dl2.LEQ(ee_disp.norm(dim=1), self.speed_limit)
+        return dl2.LEQ(inst_velocities, self.speed_limit)
 
 
     def get_domains(self, x_batches, y_batches):
         assert len(x_batches) == 2
-        _, pose_ins = x_batches
-        return [[Box(pose_ins[i] - self.eps, pose_ins[i] + self.eps)] for i in range(len(pose_ins))]
+        current_poses, _ = x_batches
+        range_lower = current_poses - self.eps
+        range_upper = current_poses + self.eps
+
+        return [Box(range_lower, range_upper)] 
 
 
-class MatchOrientation(Constraint):
+class MatchOrientation():
     def __init__(self, net, orientation, joint_param_names, robot_model, eps=1e-3, dt=0.05, use_cuda=True):
         self.net = net
         self.use_cuda = use_cuda
@@ -240,7 +219,7 @@ class MatchOrientation(Constraint):
         return [[Box(pose_ins[i] - self.eps, pose_ins[i] + self.eps)] for i in range(len(pose_ins))]
 
 
-class SmoothMotion(Constraint):
+class SmoothMotion():
     def __init__(self, net, max_dist, joint_param_names, robot_model, eps=1e-3, dt=0.05, use_cuda=True):
         self.net = net
         self.use_cuda = use_cuda
