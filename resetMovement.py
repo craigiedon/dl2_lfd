@@ -109,31 +109,41 @@ def move_to_position_rotation(move_group, position, rpy):
     success = move_group.go(desired_pose, wait=True)
     return success
 
-class RobotStateCache(object):
-    def __init__(self, joint_names):
-        self.joint_names = joint_names
-        self.bridge = CvBridge()
-        self.image = None
-        self.joint_pos = None
+# class RobotStateCache(object):
+#     def __init__(self, joint_names):
+#         self.joint_names = joint_names
+#         self.bridge = CvBridge()
+#         self.image = None
+#         self.joint_pos = None
 
 
-    def update_img(self, img_msg):
-        img = self.bridge.imgmsg_to_cv2(img_msg, "rgb8")
-        x, y, width, height = 200, 120, 590, 460 
-        cropped_im = img[y:y + height, x:x + width]
-        resized_im = cv2.resize(cropped_im, (IMAGE_SIZE, IMAGE_SIZE))
-        self.image = cv_to_nn_input(resized_im)
+#     def update_img(self, img_msg):
+#         img = self.bridge.imgmsg_to_cv2(img_msg, "rgb8")
+#         x, y, width, height = 200, 120, 590, 460 
+#         cropped_im = img[y:y + height, x:x + width]
+#         resized_im = cv2.resize(cropped_im, (IMAGE_SIZE, IMAGE_SIZE))
+#         self.image = cv_to_nn_input(resized_im)
     
 
-    def update_joint_pos(self, joint_state):
-        j_pos = joint_state.position
-        all_names = joint_state.name
-        self.joint_pos = [j_pos[all_names.index(jn)] for jn in self.joint_names]
+#     def update_joint_pos(self, joint_state):
+#         j_pos = joint_state.position
+#         all_names = joint_state.name
+#         self.joint_pos = [j_pos[all_names.index(jn)] for jn in self.joint_names]
 
 
 def reset_pose():
     rospy.init_node('pr2_mover', anonymous=True)
     r = rospy.Rate(1)
+
+    moveit_commander.roscpp_initialize(sys.argv)
+
+    robot = moveit_commander.RobotCommander()
+    scene = moveit_commander.PlanningSceneInterface()
+    l_group = moveit_commander.MoveGroupCommander('left_arm')
+    l_group.set_pose_reference_frame("base_link")
+
+    r_group = moveit_commander.MoveGroupCommander('right_arm')
+    r_group.set_pose_reference_frame("base_link")
 
     exp_config = byteify(load_json("config/experiment_config.json"))
 
@@ -151,18 +161,29 @@ def reset_pose():
         "r_wrist_flex_joint",
         "r_wrist_roll_joint"]
 
-    left_start = [ 0.2242,  0.3300,  1.4105, -0.8090,  0.1163, -0.9732,  0.2731]
-    right_start = [-0.7920,  0.5493, -1.1246, -1.0972, -0.8366, -1.0461, -0.0410]
+    # left_start = [ 0.2242,  0.3300,  1.4105, -0.8090,  0.1163, -0.9732,  0.2731]
+    # right_start = [-0.7920,  0.5493, -1.1246, -1.0972, -0.8366, -1.0461, -0.0410]
 
-    rospy.sleep(3)
-    send_arm_goal(left_start, left_command, exp_config["nn_joint_names"])
-    send_arm_goal(right_start, right_command, right_joints)
-    rospy.sleep(3)
+    # rospy.sleep(3)
+    # send_arm_goal(left_start, left_command, exp_config["nn_joint_names"])
+    # send_arm_goal(right_start, right_command, right_joints)
+    # rospy.sleep(3)
+
+    r_start_pos = np.array([0.6, -0.45, 0.9])
+    r_start_rpy = np.array([-1.75, 0.08, 1.17])
+
+    l_start_pos = np.array([0.4, 0.2, 0.8])
+    l_start_rpy = r_start_rpy + np.array([np.pi / 2, 0, -np.pi / 2])
+
+    move_to_position_rotation(r_group, r_start_pos, r_start_rpy)
+    move_to_position_rotation(l_group, l_start_pos, l_start_rpy)
 
     print('Robot policy Prepared.')
     # model.eval()
-    # while not rospy.is_shutdown():
-    #     r.sleep()
+    while not rospy.is_shutdown():
+        l_start_rpy[0] += 0.1
+        move_to_position_rotation(l_group, l_start_pos, l_start_rpy)
+        r.sleep()
 
     print('Done.')
 

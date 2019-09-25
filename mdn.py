@@ -96,14 +96,14 @@ def sample(pi, sigma, mu, num_samples=1):
     selected_sigmas = sigma[sampled_pis]
     eps = torch.randn_like(selected_mus)
 
-    print("sel mus {}, eps {}, sel sigs {}".format(selected_mus.shape, eps.shape, selected_sigmas.shape))
+    # print("sel mus {}, eps {}, sel sigs {}".format(selected_mus.shape, eps.shape, selected_sigmas.shape))
 
     return selected_mus + eps * selected_sigmas
 
 def approx_ml(pi, sigma, mu, num_samples=100):
     samples = sample(pi, sigma, mu, num_samples)
     likelihoods = (pi * gaussian_probability(sigma.expand(num_samples, -1, -1), mu.expand(num_samples, -1, -1), samples)).sum(dim=1)
-    print(likelihoods.shape)
+    # print(likelihoods.shape)
     most_likely_id = torch.argmax(likelihoods)
     return samples[most_likely_id]
     
