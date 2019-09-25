@@ -5,3 +5,4 @@ logs/
 *.pyc
 demos/
 *.mp4
+saved_models

@@ -16,6 +16,7 @@ from helper_funcs.transforms import get_trans, get_grayscale_trans
 from helper_funcs.utils import load_json
 import torch
 from model import ZhangNet, PosePlusStateNet
+from mdn import approx_ml
 from cv_bridge import CvBridge
 import cv2
 from scipy.spatial.transform import Rotation as R
@@ -53,7 +54,7 @@ class RobotStateCache(object):
         # print("min", np.min(self.depth_im), "max", np.max(self.depth_im))
 
     def update_l_pose(self, pose_stamped):
-        print("Updating l pose!")
+        # print("Updating l pose!")
         pos = pose_stamped.pose.position
         quat = pose_stamped.pose.orientation
         rpy = R.from_quat([quat.x, quat.y, quat.z, quat.w]).as_euler('xyz') / np.pi
@@ -61,7 +62,7 @@ class RobotStateCache(object):
 
 
     def update_r_pose(self, pose_stamped):
-        print("Updating r pose!")
+        # print("Updating r pose!")
         pos = pose_stamped.pose.position
         quat = pose_stamped.pose.orientation
         rpy = R.from_quat([quat.x, quat.y, quat.z, quat.w]).as_euler('xyz') / np.pi
@@ -103,7 +104,7 @@ def main(model_path):
     #     from_demo=0,
     #     to_demo=1)
 
-    model = PosePlusStateNet(100)
+    model = PosePlusStateNet(100, 2)
     model.load_state_dict(torch.load(model_path, map_location=device))
     model.to(device)
     model.eval() # Imporant if you have dropout / batchnorm layers!
@@ -135,8 +136,11 @@ def main(model_path):
     right_start_pos = np.array([0.57622, -0.45568, 0.85959])
     right_start_quat = np.array([-0.6559, -0.4068, 0.3795, 0.5101])
 
-    left_start_pos = np.array([0.68368, 0.1201, 0.8733])
-    left_start_quat = np.array([0.49261, -0.5294, -0.4433, 0.529611])
+    left_start_pos = np.array([0.5635, 0.0926, 0.9178])
+    left_start_quat= np.array([0.497706, -0.5401, -0.4214, 0.5319])
+
+    # left_start_pos = np.array([0.68368, 0.1201, 0.8733])
+    # left_start_quat = np.array([0.49261, -0.5294, -0.4433, 0.529611])
 
     move_to_pos_quat(l_group, left_start_pos, left_start_quat)
     move_to_pos_quat(r_group, right_start_pos, right_start_quat)
@@ -168,13 +172,17 @@ def main(model_path):
             with torch.no_grad():
                 current_pose = torch.tensor(state_cache.l_pose, dtype=torch.float)
                 goal_pose = torch.tensor(state_cache.r_pose, dtype=torch.float)
+                print("Current: {}".format(current_pose))
 
-                next_pose = model( current_pose.unsqueeze(0), goal_pose.unsqueeze(0))
-                next_position = next_pose[0][0:3].numpy().astype(np.float64)
-                next_rpy = next_pose[0][3:].numpy().astype(np.float64) * np.pi
+                pis, stds, mus = model( current_pose.unsqueeze(0), goal_pose.unsqueeze(0))
+                next_pose = approx_ml(pis[0], stds[0], mus[0], num_samples=1000)
+
+                print("Next {}".format(next_pose))
+                next_position = next_pose[0:3].numpy().astype(np.float64)
+                next_rpy = next_pose[3:].numpy().astype(np.float64) * np.pi
                 next_quat = R.from_euler("xyz", next_rpy).as_quat()
 
-                # move_to_pos_quat(l_group, next_position, next_quat)
+                move_to_pos_quat(l_group, next_position, next_quat)
         r.sleep()
 
 
