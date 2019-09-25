@@ -16,6 +16,7 @@
     "batch_size": 64,
     "epochs": 1000,
     "constr_weight": 0.1,
+    "num_iters": 50,
     "image_config": {
         "file_glob": "kinect2_qhd_image_color_rect_*.jpg",
         "crop_top": 120,

@@ -49,7 +49,7 @@ def act(last_state, model, arm_publisher, joint_names):
 
     with torch.no_grad():
         torch_im = torch.from_numpy(last_state.image.transpose(2, 0, 1)).to(dtype=torch.float)
-        torch_pos = wrap_pose(torch.FloatTensor(last_state.joint_pos)) # device="cuda")
+        torch_pos = wrap_unbounded_rads(torch.FloatTensor(last_state.joint_pos)) # device="cuda")
 
         cv2.imshow('Input', cv2.cvtColor(nn_input_to_imshow(torch_im), cv2.COLOR_RGB2BGR))
         cv2.waitKey(100)

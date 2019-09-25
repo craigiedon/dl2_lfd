@@ -71,8 +71,9 @@ def gaussian_probability(sigma, mu, target):
         probabilities (BxG): The probability of each point in the probability
             of the distribution in the corresponding sigma/mu index.
     """
+    eps = 1e-8 # For stability issues
     target = target.unsqueeze(1).expand_as(sigma)
-    ret = ONEOVERSQRT2PI * torch.exp(-0.5 * ((target - mu) / sigma)**2) / sigma
+    ret = ONEOVERSQRT2PI * torch.exp(-0.5 * ((target - mu) / sigma)**2) / sigma + eps
     return torch.prod(ret, 2)
 
 

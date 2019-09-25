@@ -190,7 +190,7 @@ class ImageAndJointsNet(nn.Module):
 
 
 class ImageOnlyNet(nn.Module):
-    def __init__(self, image_height, image_width, joint_dim):
+    def __init__(self, image_height, image_width, out_dims):
         super(ImageOnlyNet, self).__init__()
         self.conv1 = nn.Conv2d(in_channels=3, out_channels=32, kernel_size=4, stride=2)
         self.conv1_bn = nn.BatchNorm2d(self.conv1.out_channels)
@@ -205,14 +205,17 @@ class ImageOnlyNet(nn.Module):
         o_height, o_width = out_size_cnns((image_height, image_width), [self.conv1, self.conv2, self.conv3])
 
         linear_input_size = o_height * o_width * self.conv3.out_channels
-
         hidden_layer_dim = 100
 
-        self.linear1 = nn.Linear(linear_input_size, hidden_layer_dim)
-        self.lin_drop = nn.Dropout()
+        self.ff = nn.Sequential(
+            nn.Dropout(),
+            nn.Linear(linear_input_size, hidden_layer_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_layer_dim, hidden_layer_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_layer_dim, out_dims)
+        )
 
-        self.linear2 = nn.Linear(hidden_layer_dim, hidden_layer_dim)
-        self.linear3 = nn.Linear(hidden_layer_dim, joint_dim)
 
     def forward(self, img_ins):
         conv1_out = F.leaky_relu(self.conv1_bn(self.conv1(img_ins)))
@@ -221,10 +224,7 @@ class ImageOnlyNet(nn.Module):
 
         flattened_conv = torch.flatten(conv3_out, 1)
 
-        lin1_out = self.lin_drop(F.leaky_relu(self.linear1(flattened_conv)))
-        lin2_out = F.leaky_relu(self.linear2(lin1_out))
-        output = self.linear3(lin2_out)
-
+        output = self.ff(flattened_conv)
         return output
 
 def out_size_cnns(img_dims, cnns):
@@ -254,9 +254,16 @@ class ImageOnlyMDN(nn.Module):
         print("Kernel Size: {}".format(self.conv1.kernel_size))
         o_height, o_width = out_size_cnns((image_height, image_width), [self.conv1, self.conv2, self.conv3])
         linear_input_size = o_height * o_width * self.conv3.out_channels
-        hidden_layer_dim = 512
 
-        self.mdn = MDN(linear_input_size, hidden_layer_dim, joint_dim, mix_num)
+        hidden_layer_dim = 100
+
+        self.ff = nn.Sequential(
+            nn.Dropout(),
+            nn.Linear(linear_input_size, hidden_layer_dim),
+            nn.ReLU(),
+        )
+
+        self.mdn = MDN(hidden_layer_dim, joint_dim, mix_num)
 
 
     def forward(self, img_ins):
@@ -266,22 +273,24 @@ class ImageOnlyMDN(nn.Module):
 
         flattened_conv = torch.flatten(conv3_out, 1)
 
-        mu, std, pi = self.mdn(flattened_conv)
+        ff_embed = self.ff(flattened_conv)
+        pi, std, mu = self.mdn(ff_embed)
 
-        return mu, std, pi
+        return pi, std, mu
 
 
 class PosePlusStateNet(nn.Module):
-    def __init__(self, hidden_dim, mix_num):
+    def __init__(self, hidden_dim):
         super(PosePlusStateNet, self).__init__()
         self.ff = nn.Sequential(
             nn.Linear(12, hidden_dim),
-            nn.LeakyReLU(),
+            nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
-            nn.LeakyReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.LeakyReLU(),
-            MDN(hidden_dim, 6, mix_num)
+            nn.ReLU(),
+            # nn.Linear(hidden_dim, hidden_dim),
+            # nn.LeakyReLU(),
+            # MDN(hidden_dim, 6, mix_num)
+            nn.Linear(hidden_dim, 6)
         )
 
     def forward(self, pose_ins, goal_ins):
