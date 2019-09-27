@@ -1,28 +1,32 @@
 import numpy as np
 from scipy.interpolate import interp1d
 import matplotlib.pyplot as plt
+import pickle
+from math import ceil
 
 class CanonicalSystem():
 
-    def __init__(self, dt, start_x=1.0, ax=1.0):
+    def __init__(self, dt, start_x=1.0, ax=5.0):
+        # self.ax = -np.log(cutoff)
         self.ax = ax
         self.dt = dt
         self.start_x = start_x
+        self.T = timesteps(dt)
 
 
 
-def canonical_rollout(start_val, ax, dt):
+def canonical_rollout(start_val, ax, dt, tau=1.0):
     T = timesteps(dt)
     x_t = np.zeros(T)
     x_t[0] = start_val
 
     for t in range(1, T):
-        x_t[t] = canonical_step(x_t[t-1], ax, dt)
+        x_t[t] = canonical_step(x_t[t-1], ax, dt, tau)
     
     return x_t
 
-def canonical_step(x, ax, dt):
-    return x - ax * x * dt
+def canonical_step(x, ax, dt, tau=1.0):
+    return x - (ax * x * dt) * tau
 
 
 def timesteps(dt):
@@ -33,21 +37,22 @@ def rbf(x, h, c):
     return np.exp(-h * (x[:,None] - c)**2)
 
 class DMP():
-    def __init__(self, y0, goal, num_basis_funcs=5, dt=0.05, d=2, jnames=None):
+    def __init__(self, y0, goal, num_basis_funcs=5, dt=0.01, d=2, jnames=None):
         self.ay = np.ones(d) * 25
         self.by = self.ay / 4.0
         self.dt = dt
+        self.T = timesteps(dt)
         self.n_basis_funcs = num_basis_funcs
         self.dims = d
 
         self.joint_names = jnames if jnames is not None else []
 
         self.cs = CanonicalSystem(dt=self.dt)
-        self.T = timesteps(dt)
 
         # Spacing centres out equally isn't great if x is decaying non_linearly, so instead try exponential spacing
         self.c = np.exp(-self.cs.ax * np.linspace(0, 1, self.n_basis_funcs))
         self.h = np.ones(self.n_basis_funcs) * self.n_basis_funcs**1.5 / (self.c * self.cs.ax)
+        # self.h = np.ones(self.n_basis_funcs) * self.n_basis_funcs / (self.c)
 
         # Start and goal points
         self.goal = goal
@@ -56,9 +61,9 @@ class DMP():
         self.weights = None
 
 
-    def step(self, x, y, dy):
+    def step(self, x, y, dy, tau=1.0):
         # step canonical system
-        x_next = canonical_step(x, self.cs.ax, self.cs.dt)
+        x_next = canonical_step(x, self.cs.ax, self.cs.dt, tau)
 
         # generate basis function activation
         psi = rbf(np.array([x_next]), self.h, self.c)
@@ -66,35 +71,43 @@ class DMP():
         f = np.zeros(self.dims)
         for d in range(self.dims):
             # generate the forcing term
-            f[d] = (x_next * (self.goal[d] - self.y0[d]) * (np.dot(psi, self.weights[d])) / np.sum(psi))
+            f[d] = x_next * (np.dot(psi, self.weights[d])) / np.sum(psi)
 
         # DMP acceleration
-        ddy_next = (self.ay * (self.by * (self.goal - y) - dy) + f)
+        # Sugar notation to agree with Pastor (2008) notation
+        K = self.ay * self.by
+        D = self.ay
+        ddy_next = (K * (self.goal - y) - D * dy / tau - K * (self.goal - self.y0) * x_next + K * f) * tau
+        # - K * f = K * (self.goal - y) - D * dy - K * (self.goal - self.y0) * x_next
+        #  f = -(self.goal - y) + (D * dy / K) + (self.goal - self.y0) * x_next + ddy_next / K
+        # ddy_next = self.ay * (self.by * (self.goal - y) - dy) + (self.goal - self.y0) * f
+
+        # ddy_next = K * (self.goal - y) - D * dy + (self.goal - self.y0) * f
 
         # DMP Velocity
-        dy_next = dy + ddy_next * self.dt
+        dy_next = dy + (ddy_next * self.dt) * tau
         y_next = y + dy_next * self.dt
 
         return x_next, y_next, dy_next, ddy_next
 
-    def rollout(self):
+    def rollout(self, tau=1.0):
+        scaled_time = int(self.T / tau)
         # set up tracking vectors
-        y_track = np.zeros((self.T, self.dims))
-        dy_track = np.zeros((self.T, self.dims))
-        ddy_track = np.zeros((self.T, self.dims))
+        y_track = np.zeros((scaled_time, self.dims))
+        dy_track = np.zeros((scaled_time, self.dims))
+        ddy_track = np.zeros((scaled_time, self.dims))
 
         y_track[0] = self.y0
 
         x = self.cs.start_x
 
-        for t in range(1, self.T):
-            x, y_track[t], dy_track[t], ddy_track[t] = self.step(x, y_track[t-1], dy_track[t-1])
+        for t in range(1, scaled_time):
+            x, y_track[t], dy_track[t], ddy_track[t] = self.step(x, y_track[t-1], dy_track[t-1], tau)
 
         return y_track, dy_track, ddy_track
 
     
-def interpolated_path(recorded_ys, dt):
-    T = timesteps(dt)
+def interpolated_path(recorded_ys, dt, T):
     num_points, dims = recorded_ys.shape[0], recorded_ys.shape[1]
     path = np.zeros((dims, T))
     x = np.linspace(0, 1, num_points)
@@ -110,8 +123,10 @@ def imitate_path(y_d, dmp):
     y_start = y_d[0, :].copy()
     y_goal = y_d[-1, :].copy()
 
+    x_track = canonical_rollout(dmp.cs.start_x, dmp.cs.ax, dmp.dt)
+
     # generate function to interpolate the desired trajectory
-    path = interpolated_path(y_d, dmp.dt)
+    path = interpolated_path(y_d, dmp.dt, dmp.T)
     dims =  path.shape[0]
 
     # Calculate the velocity of y_des
@@ -125,7 +140,13 @@ def imitate_path(y_d, dmp):
     ddy_d = np.hstack((np.zeros((dims, 1)), ddy_d))
 
     # find the force required to move along this trajectory
-    f_target = ddy_d.T - dmp.ay * (dmp.by * (y_goal - path.T) - dy_d.T)
+    K = dmp.ay * dmp.by
+    D = dmp.ay
+    # f_target = (ddy_d.T - (K * (y_goal - path.T) - D * dy_d.T))  / (dmp.goal - dmp.y0)
+
+    # f_target =  (ddy_next + D * dy_d) / K - (dmp.goal - path) + (dmp.goal - dmp.y0) * x_track 
+
+    f_target = (ddy_d.T + D * dy_d.T) / K - (dmp.goal - path.T) + (dmp.goal - dmp.y0) * np.tile(x_track, (dims, 1)).T
 
     # efficiently generate weights to realize f_target
     weights = gen_weights(f_target, y_start, y_goal, dmp) 
@@ -143,16 +164,16 @@ def gen_weights(f_target, y_start, y_goal, dmp):
     weights = np.zeros((dmp.dims, dmp.n_basis_funcs))
     for d in range(dmp.dims):
         # spatial scaling term
-        k = (y_goal[d] - y_start[d])
+        # k = (y_goal[d] - y_start[d])
         for b in range(dmp.n_basis_funcs):
-            weights[d,b] = (np.sum(x_track * psi_track[:, b] * f_target[:, d])) / (np.sum(x_track**2*psi_track[:, b]) * k)
+            weights[d,b] = (np.sum(x_track * psi_track[:, b] * f_target[:, d])) / (np.sum(x_track**2*psi_track[:, b]))
     weights = np.nan_to_num(weights)
     return weights
 
 
 def save_dmp(dmp, dmp_path):
     with open(dmp_path, "wb") as f:
-        pickle.dump(dmp, f, pickle.HIGHEST_PROTOCOL)
+        pickle.dump(dmp, f, 2)
 
 
 def load_dmp(dmp_path):
@@ -161,12 +182,15 @@ def load_dmp(dmp_path):
     return dmp
 
 
-def plot_rollout(dmp_rollout, raw_path):
-    plt.subplot(1, 2, 1)
-    plt.cla()
-    plt.plot(dmp_rollout)
-    plt.subplot(1, 2, 2)
-    plt.cla()
-    plt.plot(raw_path)
-    plt.draw()
-    plt.pause(0.1)
+def plot_rollout(dmp_rollout, raw_path = None):
+    dims = dmp_rollout.shape[1]
+    for d in range(dims):
+        plt.subplot(2,ceil(dims / 2),d + 1)
+        dmp_timescale = np.linspace(0, 1, dmp_rollout.shape[0])
+        plt.plot(dmp_timescale, dmp_rollout[:, d], label="DMP")
+
+        if raw_path is not None:
+            raw_timescale = np.linspace(0, 1, raw_path.shape[0])
+            plt.plot(raw_timescale, raw_path[:, d], label="Raw")
+        plt.legend()
+    plt.show()
