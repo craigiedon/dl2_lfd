@@ -7,4 +7,14 @@
     pkg="dl2_lfd" 
     type="frame_as_posestamped.py"
     args="r_wrist_roll_link base_link 30"/>
+
+	<node name="acceletometer_throttler_l" type="throttle" pkg="topic_tools" args="messages /accelerometer/l_gripper_motor 30 /accelerometer/l_gripper_motor_throttled" />
+	<node name="acceletometer_throttler_r" type="throttle" pkg="topic_tools" args="messages /accelerometer/l_gripper_motor 30 /accelerometer/r_gripper_motor_throttled" />
+
+
+    <node name="data_grabber" 
+    pkg="dl2_lfd"
+    type="data_grabber.py" 
+    args="--root_path /home/michael/craig_lfd_ws/src/dl2_lfd/demos/cup_pour/ --imtopic /kinect2/qhd/image_color_rect --imtopic /kinect2/qhd/image_depth_rect --imtopic /l_forearm_cam/image_rect_color --imtopic /r_forearm_cam/image_rect_color" 
+    output="screen"/> 
 </launch>

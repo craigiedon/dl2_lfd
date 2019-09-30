@@ -1,0 +1,14 @@
+<launch>
+	<include file="$(find htc_vive_teleop_stuff)/launch/htc_vive_tf_and_joy.launch"/>
+	<include file="$(find htc_vive_teleop_stuff)/launch/controllers_to_posestamped.launch"/>
+	<include file="$(find htc_vive_teleop_stuff)/launch/endeffectors_to_posestamped.launch"/>
+
+	<include file="$(find pr2_arm_kinematics)/launch/pr2_ik_larm_node.launch"/>
+	<include file="$(find pr2_arm_kinematics)/launch/pr2_ik_rarm_node.launch"/>
+	
+	<node pkg="tf" type="static_transform_publisher" name="vive_pr2_jointframe_broadcaster" 
+	args="0.7 -1.5 0.05 0 0 0 world odom_combined 10" />
+
+	<node name="acceletometer_throttler_l" type="throttle" pkg="topic_tools" args="messages /accelerometer/l_gripper_motor 30 /accelerometer/l_gripper_motor_throttled" />
+	<node name="acceletometer_throttler_r" type="throttle" pkg="topic_tools" args="messages /accelerometer/l_gripper_motor 30 /accelerometer/r_gripper_motor_throttled" />
+</launch>

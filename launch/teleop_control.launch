@@ -1,0 +1,5 @@
+<launch>
+    <node pkg="htc_vive_teleop_stuff" name="rad_pr2_joy_controller" type="rad_teleop_pr2.py" output="screen" args=""/> 
+    <node pkg="htc_vive_teleop_stuff" name="filter_node" type="filter_jnt_traj_node.py" output="screen" /> 
+    <node pkg="htc_vive_teleop_stuff" name="data_grabber" type="data_grabber.py" args="--imtopic /kinect2/qhd/image_color_rect --imtopic /kinect2/qhd/image_depth_rect --imtopic /l_forearm_cam/image_rect_color --imtopic /r_forearm_cam/image_rect_color" output="screen"/> 
+</launch>

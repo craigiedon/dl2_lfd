@@ -30,7 +30,7 @@ def fit_dmp(pose_path):
     start_pose, goal_pose = pose_path[0, :], pose_path[-1, :]
     dims = pose_path.shape[1]
 
-    dmp = DMP(start_pose, goal_pose, num_basis_funcs=5000, dt=0.01, d=dims)
+    dmp = DMP(start_pose, goal_pose, num_basis_funcs=500, dt=0.01, d=dims)
     _, weights = imitate_path(pose_path, dmp)
     dmp.weights = weights
 
@@ -58,14 +58,16 @@ def fit_dmp(pose_path):
         plt.subplot(2,ceil(dims / 2),d + 1)
         dmp_timescale = np.linspace(0, 1, y_r.shape[0])
         plt.plot(dmp_timescale, y_r[:, d], label="DMP")
+        # plt.plot(y_r[:, d], label="DMP")
 
         raw_timescale = np.linspace(0, 1, pose_path.shape[0])
         plt.plot(raw_timescale, pose_path[:, d], label="Raw")
+        # plt.plot(pose_path[:, d], label="Raw")
 
         # dmp_shifted_timescale = np.linspace(0, tau, y_r_shifted.shape[0])
         # plt.plot( y_r_shifted[:, d], label="DMP Shifted")
 
-        plt.plot(0, [dmp.y0[d]], marker='o', markersize=3, color="red")
+        # plt.plot(0, [dmp.y0[d]], marker='o', markersize=3, color="red")
         # plt.plot(tau, [dmp.goal[d]], marker='o', markersize=3, color="red")
         plt.legend()
     plt.show()

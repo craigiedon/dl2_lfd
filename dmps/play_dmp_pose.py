@@ -14,6 +14,7 @@ from matplotlib import pyplot as plt
 import moveit_commander
 import moveit_msgs.msg
 from geometry_msgs.msg import Pose, Point, Quaternion
+from std_msgs.msg import Float64, Empty, Header
 import copy
 import tf
 
@@ -56,6 +57,7 @@ def play_back(dmp):
     start_track = StartTracker()
 
     rospy.Subscriber('joint_states',JointState, start_track.cache_header)
+    record_publisher = rospy.Publisher('/toggle_recording', Empty, queue_size=10)
 
     robot = moveit_commander.RobotCommander()
     scene = moveit_commander.PlanningSceneInterface()
@@ -68,15 +70,15 @@ def play_back(dmp):
 
     ## Setup initial starting pos here first
 
-    left_start_pos = np.array([0.68368, 0.1201, 0.8733])
-    left_start_quat = np.array([0.49261, -0.5294, -0.4433, 0.529611])
-
-    right_start_pos = np.array([0.57622, -0.45568, 0.85959])
-    right_start_quat = np.array([-0.6559, -0.4068, 0.3795, 0.5101])
+    # left_start_pos = np.array([0.68368, 0.1201, 0.8733])
+    # left_start_quat = np.array([0.49261, -0.5294, -0.4433, 0.529611])
+    
+    right_start_pos = np.array([4.350030651697819328e-01, -3.619320769156886275e-01, 9.532789909342967993e-01])
+    right_start_quat = np.array([7.092342993967834519e-02,-1.200804160961578410e-01,5.726577827747867389e-01, 8.078450498599533125e-01])
     right_start_rpy = tf.transformations.euler_from_quaternion(right_start_quat)
-
-    move_to_pos_quat(l_group, left_start_pos, left_start_quat)
     move_to_pos_quat(r_group, right_start_pos, right_start_quat)
+
+    # move_to_pos_quat(l_group, left_start_pos, left_start_quat)
 
 
     rate = rospy.Rate(0.5)
@@ -93,19 +95,19 @@ def play_back(dmp):
             rospy.sleep(1)
 
             print("Offsetting start and goal by a small amount")
-            new_start_pos = original_start[0:3] + (np.random.rand(3) - 0.5) * np.array([0.005, 0.05, 0.05])
+            new_start_pos = original_start[0:3] + (np.random.rand(3) - 0.5) * np.array([0.1, 0.1, 0.1])
             new_start_rpy = original_start[3:] + (np.random.rand(3) - 0.5) * np.pi * 0.05
 
-            # goal_offset_pos = (np.random.rand(3) - 0.5) * np.array([0.005, 0.05, 0.05])
-            # # goal_offset_rpy = (np.random.rand(3) - 0.5) * np.pi * 0.05
+            goal_offset_pos = (np.random.rand(3) - 0.5) * np.array([0.1, 0.1, 0.1])
+            goal_offset_rpy = (np.random.rand(3) - 0.5) * np.pi * 0.05
             # goal_offset = np.concatenate((goal_offset_pos, goal_offset_rpy))
 
-            new_goal_pos = original_goal[0:3] # + goal_offset_pos
-            new_goal_rpy = original_goal[3:]  # + goal_offset_rpy
+            new_goal_pos = original_goal[0:3] + goal_offset_pos
+            new_goal_rpy = original_goal[3:]  + goal_offset_rpy
 
             move_to_pos_rpy(l_group, new_start_pos, new_start_rpy)
-            # move_to_pos_rpy(r_group, right_start_pos + goal_offset_pos, right_start_rpy + goal_offset_rpy)
-            rospy.sleep(1)
+            move_to_pos_rpy(r_group, right_start_pos + goal_offset_pos, right_start_rpy + goal_offset_rpy)
+            rospy.sleep(2)
 
             orig_rollout = dmp.rollout(tau=1.0)[0]
             dmp.y0 = np.concatenate((new_start_pos, new_start_rpy))
@@ -113,23 +115,24 @@ def play_back(dmp):
 
 
             print("Rolling out from set start / end")
-            y_r = dmp.rollout(tau=1.0)[0]
+            y_r = dmp.rollout()[0]
             waypoints = rollout_to_waypoints(y_r)
-            plot_orig_v_offset(orig_rollout, y_r, dmp.y0, dmp.goal)
+            # plot_orig_v_offset(orig_rollout, y_r, dmp.y0, dmp.goal)
 
             print("Executing...")
-            reset_pos = dmp.goal[0:3] + np.array([0.0, 0.0, 0.15])
-            reset_quat = tf.transformations.quaternion_from_euler(*dmp.goal[3:])
+            # reset_pos = new_start_pos
+            # reset_rpy = new_start_rpy
 
             plan, _ = l_group.compute_cartesian_path(waypoints,0.01,0.0)
-            # l_group.execute(plan,wait=True)
+            record_publisher.publish()
+            l_group.execute(plan,wait=True)
             l_group.stop()
             l_group.clear_pose_targets()
+            record_publisher.publish()
             print("Finished executing DMP")
             rospy.sleep(2)
-            print("Unhooking the gear from the peg")
-            move_to_pos_quat(l_group, reset_pos, reset_quat)
-            break
+            # print("Unhooking the gear from the peg")
+            # move_to_pos_rpy(l_group, reset_pos, reset_rpy)
         rate.sleep()
 
 
@@ -153,5 +156,10 @@ def plot_orig_v_offset(original_rollout, offset_rollout, offset_start, offset_go
     plt.show()
 
 if __name__ == '__main__':
-    dmp = load_dmp("./saved_dmps/dmp-0-l_wrist_roll_link.npy")
+    if len(sys.argv) != 2:
+        print("Usage: play_dmp_pose.py <dmp-path>")
+        sys.exit(0)
+
+    dmp_path = sys.argv[1]
+    dmp = load_dmp(dmp_path)
     play_back(dmp)
