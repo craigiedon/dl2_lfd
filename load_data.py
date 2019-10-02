@@ -72,6 +72,7 @@ class PoseAndGoal(Dataset):
         self.skip_count = skip_count
 
         num_demos = len(images_by_demo)
+        print("Loading {} demos".format(num_demos))
         for demo_id in range(num_demos):
             for img_id in range(len(images_by_demo[demo_id]) - skip_count):
                 self.data_points.append(self.load_data_point(demo_id, img_id))

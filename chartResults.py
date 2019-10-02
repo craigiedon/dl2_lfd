@@ -5,7 +5,7 @@ import matplotlib.animation as animation
 from mpl_toolkits.mplot3d import Axes3D
 import sys
 from math import ceil
-from model import load_model, ImageOnlyMDN, ZhangNet, PosePlusStateNet, ImageOnlyNet
+from model import load_model, ImageOnlyMDN, ZhangNet, PosePlusStateNet, ImageOnlyNet, ImagePlusPoseNet
 from load_data import load_demos, load_rgbd_demos, nn_input_to_imshow, show_torched_im, load_pose_state_demos, image_demo_paths, get_pose_hist, quat_pose_to_rpy, ImageRGBDPoseHist, DeviceDataLoader, ImagePoseFuturePose, PoseAndGoal
 import numpy as np
 import torch
@@ -69,7 +69,8 @@ def plot_csv_train_val(csv_path, save_path=None, show_fig=False):
         plt.plot(df[v_col], label=v_col)
         plt.xlabel("Epoch")
         plt.ylabel("Loss")
-        plt.ylim(top=0.1)
+        # plt.ylim(top=0.1)
+        plt.yscale("log")
         plt.legend()
 
     if save_path is not None:
@@ -216,11 +217,35 @@ def chart_all_poses(demo_path):
 
     # Load all of the poses into a list, reuse some load-data functions here
     demo_trajectories = [get_pose_hist(d, "l_wrist_roll_link") for d in demo_paths]
-    demo_trajectories = [np.array([quat_pose_to_rpy(p) for p in dt]).transpose(1,0) for dt in demo_trajectories]
+    # demo_trajectories = [np.array([quat_pose_to_rpy(p) for p in dt]).transpose(1,0) for dt in demo_trajectories]
+    smoothed_trajectories = []
+    for dt in demo_trajectories:
+        smoothed_dt = [dt[0]]
+        for i in range(1, len(dt)):
+            # print(i)
+            current_pos, current_quat = dt[i][0:3], dt[i][3:]
+            prev_quat = smoothed_dt[i - 1][3:]
+            orig_diff = np.abs(current_quat - prev_quat).sum()
+            flipped_diff = np.abs(-current_quat - prev_quat).sum()
+            if flipped_diff <= orig_diff:
+                print("Orig diff {}, Flipped diff{} at {} ".format(orig_diff, flipped_diff, i))
+                print("Original quat {}, Flipped {} ".format(current_quat, -current_quat))
+                smoothed_dt.append(np.concatenate((current_pos, -current_quat)))
+                print(len(smoothed_dt))
+            else:
+                smoothed_dt.append(np.concatenate((current_pos, current_quat)))
+        smoothed_trajectories.append(np.array(smoothed_dt))
 
-    pose_dim_names = ["x", "y", "z", "r-x", "r-y", "r-z"]
-    for i in range(6):
-        plt.subplot(2,3, i + 1)
+    # smoothed_trajectories = demo_trajectories
+
+
+    # demo_trajectories = [dt.transpose(1,0) for dt in demo_trajectories]
+    demo_trajectories = [dt.transpose(1,0) for dt in smoothed_trajectories]
+
+    # pose_dim_names = ["x", "y", "z", "r-x", "r-y", "r-z"]
+    pose_dim_names = ["x", "y", "z", "q-x", "q-y", "q-z", "q-w"]
+    for i in range(len(pose_dim_names)):
+        plt.subplot(3,3, i + 1)
         plt.xlabel("time")
         plt.ylabel((pose_dim_names[i]))
         for d in demo_trajectories:
@@ -256,11 +281,17 @@ def chart_pred_goal_pose(model_path, demo_path, demo_num):
     im_params = exp_config["image_config"]
 
     train_paths = image_demo_paths(exp_config["demo_folder"], im_params["file_glob"], from_demo=demo_num, to_demo=demo_num + 1)
-    train_set = PoseAndGoal(train_paths, "l_wrist_roll_link", "r_wrist_roll_link", skip_count=10)
+    # train_set = PoseAndGoal(train_paths, "l_wrist_roll_link", "r_wrist_roll_link", skip_count=10)
+    train_set = ImagePoseFuturePose(train_paths, "l_wrist_roll_link", get_trans(im_params, distorted=False), skip_count=10)
     demo_loader = DeviceDataLoader(DataLoader(train_set, exp_config["batch_size"], shuffle=False), torch.device("cuda"))
 
-    model = PosePlusStateNet(100)
+    # model = PosePlusStateNet(100)
+
+
+
+    model = ImagePlusPoseNet((im_params["resize_height"], im_params["resize_width"]), 100)
     model.load_state_dict(torch.load(model_path, map_location=torch.device("cuda")))
+
     model.to(torch.device("cuda"))
     model.eval()
 
@@ -268,8 +299,8 @@ def chart_pred_goal_pose(model_path, demo_path, demo_num):
 
     with torch.no_grad():
         for ins in demo_loader:
-            current_pose, goal_pose, target_pose = ins 
-            next_pred = model(current_pose, goal_pose)
+            img_in, current_pose, target_pose = ins 
+            next_pred = model(img_in, current_pose)
             next_pred_all.append(next_pred)
             next_targets_all.append(target_pose)
             current_pose_all.append(current_pose)

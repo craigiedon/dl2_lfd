@@ -279,17 +279,67 @@ class ImageOnlyMDN(nn.Module):
         return pi, std, mu
 
 
+class ImagePlusPoseNet(nn.Module):
+    def __init__(self, img_dims, hidden_dim):
+        super(ImagePlusPoseNet, self).__init__()
+        self.cn1 = nn.Conv2d(in_channels=3, out_channels=32, kernel_size=4, stride=2)
+        self.cn2 = nn.Conv2d(in_channels=32, out_channels=32, kernel_size=4, stride=2)
+        self.cn3 = nn.Conv2d(in_channels=32, out_channels=32, kernel_size=4, stride=2)
+
+
+        self.convLayers = nn.Sequential(
+            self.cn1,
+            nn.BatchNorm2d(self.cn1.out_channels),
+            nn.ReLU(),
+
+            self.cn2,
+            nn.BatchNorm2d(self.cn2.out_channels),
+            nn.ReLU(),
+
+            self.cn3,
+            nn.BatchNorm2d(self.cn3.out_channels),
+            nn.ReLU(),
+        )
+
+        o_height, o_width = out_size_cnns(img_dims, [self.cn1, self.cn2, self.cn3])
+        flattened_im_size = o_height * o_width * self.cn3.out_channels
+        pose_dims = 6
+
+        self.ff1 = nn.Sequential(
+            nn.Linear(flattened_im_size, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout()
+        )
+
+        self.ff2 = nn.Sequential(
+            nn.Linear(hidden_dim + pose_dims, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, pose_dims)
+        )
+
+
+    def forward(self, img_ins, pose_ins):
+        im_embedding = self.convLayers(img_ins)
+        flattened_emb = torch.flatten(im_embedding, 1)
+
+        ff1_out = self.ff1(flattened_emb)
+        im_and_pose = torch.cat((ff1_out, pose_ins), dim=1)
+        ff2_out = self.ff2(im_and_pose)
+
+        return ff2_out
+
 class PosePlusStateNet(nn.Module):
     def __init__(self, hidden_dim):
         super(PosePlusStateNet, self).__init__()
         self.ff = nn.Sequential(
             nn.Linear(12, hidden_dim),
+            # nn.BatchNorm1d(hidden_dim),
             nn.ReLU(),
+
             nn.Linear(hidden_dim, hidden_dim),
+            # nn.BatchNorm1d(hidden_dim),
             nn.ReLU(),
-            # nn.Linear(hidden_dim, hidden_dim),
-            # nn.LeakyReLU(),
-            # MDN(hidden_dim, 6, mix_num)
+
             nn.Linear(hidden_dim, 6)
         )
 

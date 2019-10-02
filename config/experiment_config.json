@@ -1,6 +1,6 @@
 {
     "experiment_name": "GearInsertUnconstrained",
-    "demo_folder": "./demos/gear_good",
+    "demo_folder": "./demos/cup_dmp/",
     "nn_joint_names": [
         "l_shoulder_pan_joint",
         "l_shoulder_lift_joint",
