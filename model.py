@@ -20,8 +20,8 @@ class SpatialSoftmax(nn.Module):
         flat_maxed = F.softmax(ins.reshape(n, c, -1), dim=2)
         flat_maxed = flat_maxed.reshape(n, c, h, w)
 
-        expected_xs = (flat_maxed * self.x_inds).sum(dim=(2,3))
-        expected_ys = (flat_maxed * self.y_inds).sum(dim=(2,3))
+        expected_xs = (flat_maxed * self.x_inds).sum(dim=(2,3)) / w
+        expected_ys = (flat_maxed * self.y_inds).sum(dim=(2,3)) / h
 
         feature_points = torch.cat((expected_xs, expected_ys), dim=1)
 
@@ -284,7 +284,7 @@ class ImagePlusPoseNet(nn.Module):
         super(ImagePlusPoseNet, self).__init__()
         self.cn1 = nn.Conv2d(in_channels=3, out_channels=32, kernel_size=4, stride=2)
         self.cn2 = nn.Conv2d(in_channels=32, out_channels=32, kernel_size=4, stride=2)
-        self.cn3 = nn.Conv2d(in_channels=32, out_channels=32, kernel_size=4, stride=2)
+        self.cn3 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2)
 
 
         self.convLayers = nn.Sequential(
@@ -305,11 +305,22 @@ class ImagePlusPoseNet(nn.Module):
         flattened_im_size = o_height * o_width * self.cn3.out_channels
         pose_dims = 6
 
-        self.ff1 = nn.Sequential(
-            nn.Linear(flattened_im_size, hidden_dim),
+
+        self.image_only_ff = nn.Sequential(
+            SpatialSoftmax(o_height, o_width),
+            nn.Linear(self.cn3.out_channels * 2, hidden_dim),
             nn.ReLU(),
-            nn.Dropout()
+            nn.Dropout(),
+            # nn.Linear(hidden_dim, hidden_dim),
+            # nn.ReLU(),
+            # nn.Linear(hidden_dim, pose_dims)
         )
+
+        # self.ff1 = nn.Sequential(
+        #     nn.Linear(flattened_im_size, hidden_dim),
+        #     nn.ReLU(),
+        #     nn.Dropout()
+        # )
 
         self.ff2 = nn.Sequential(
             nn.Linear(hidden_dim + pose_dims, hidden_dim),
@@ -321,9 +332,9 @@ class ImagePlusPoseNet(nn.Module):
     def forward(self, img_ins, pose_ins):
         im_embedding = self.convLayers(img_ins)
         flattened_emb = torch.flatten(im_embedding, 1)
+        im_spatial = self.image_only_ff(im_embedding)
 
-        ff1_out = self.ff1(flattened_emb)
-        im_and_pose = torch.cat((ff1_out, pose_ins), dim=1)
+        im_and_pose = torch.cat((im_spatial, pose_ins), dim=1)
         ff2_out = self.ff2(im_and_pose)
 
         return ff2_out
