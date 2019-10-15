@@ -1,6 +1,6 @@
 {
-    "experiment_name": "GearInsertUnconstrained",
-    "demo_folder": "./demos/cup_dmp/",
+    "experiment_name": "CupPour",
+    "demo_folder": "./demos/cup_pour_prog/",
     "nn_joint_names": [
         "l_shoulder_pan_joint",
         "l_shoulder_lift_joint",
@@ -23,7 +23,7 @@
         "crop_left": 200,
         "crop_width": 590,
         "crop_height": 460,
-        "resize_height": 128,
-        "resize_width": 128
+        "resize_height": 224,
+        "resize_width": 224
     }
 }

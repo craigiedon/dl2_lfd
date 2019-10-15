@@ -306,21 +306,21 @@ class ImagePlusPoseNet(nn.Module):
         pose_dims = 6
 
 
-        self.image_only_ff = nn.Sequential(
-            SpatialSoftmax(o_height, o_width),
-            nn.Linear(self.cn3.out_channels * 2, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(),
-            # nn.Linear(hidden_dim, hidden_dim),
-            # nn.ReLU(),
-            # nn.Linear(hidden_dim, pose_dims)
-        )
-
-        # self.ff1 = nn.Sequential(
+        # self.image_only_ff = nn.Sequential(
+        #     # SpatialSoftmax(o_height, o_width),
         #     nn.Linear(flattened_im_size, hidden_dim),
         #     nn.ReLU(),
-        #     nn.Dropout()
+        #     nn.Dropout(),
+        #     nn.Linear(hidden_dim, hidden_dim),
+        #     nn.ReLU(),
+        #     nn.Linear(hidden_dim, pose_dims)
         # )
+
+        self.ff1 = nn.Sequential(
+            nn.Linear(flattened_im_size, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout()
+        )
 
         self.ff2 = nn.Sequential(
             nn.Linear(hidden_dim + pose_dims, hidden_dim),
@@ -332,9 +332,8 @@ class ImagePlusPoseNet(nn.Module):
     def forward(self, img_ins, pose_ins):
         im_embedding = self.convLayers(img_ins)
         flattened_emb = torch.flatten(im_embedding, 1)
-        im_spatial = self.image_only_ff(im_embedding)
-
-        im_and_pose = torch.cat((im_spatial, pose_ins), dim=1)
+        im_hidden = self.ff1(flattened_emb)
+        im_and_pose = torch.cat((im_hidden, pose_ins), dim=1)
         ff2_out = self.ff2(im_and_pose)
 
         return ff2_out
