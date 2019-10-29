@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+import torchvision.models as premods
 from torch import nn 
 from mdn import MDN
 
@@ -286,6 +287,8 @@ class ImagePlusPoseNet(nn.Module):
         self.cn2 = nn.Conv2d(in_channels=32, out_channels=32, kernel_size=4, stride=2)
         self.cn3 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2)
 
+        # self.res50 = premods.resnet50(pretrained=True, progress=True)
+
 
         self.convLayers = nn.Sequential(
             self.cn1,
@@ -316,27 +319,37 @@ class ImagePlusPoseNet(nn.Module):
         #     nn.Linear(hidden_dim, pose_dims)
         # )
 
-        self.ff1 = nn.Sequential(
-            nn.Linear(flattened_im_size, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout()
-        )
+        # self.ff1 = nn.Sequential(
+        #     nn.Linear(flattened_im_size, hidden_dim),
+        #     nn.ReLU(),
+        #     nn.Dropout()
+        # )
 
-        self.ff2 = nn.Sequential(
-            nn.Linear(hidden_dim + pose_dims, hidden_dim),
+        # self.ff2 = nn.Sequential(
+        #     nn.Linear(hidden_dim + pose_dims, hidden_dim),
+        #     nn.ReLU(),
+        #     nn.Linear(hidden_dim, pose_dims)
+        # )
+
+        self.poseOnlyff = nn.Sequential(
+            nn.Linear(pose_dims, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(),
+            nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, pose_dims)
         )
 
 
     def forward(self, img_ins, pose_ins):
-        im_embedding = self.convLayers(img_ins)
-        flattened_emb = torch.flatten(im_embedding, 1)
-        im_hidden = self.ff1(flattened_emb)
-        im_and_pose = torch.cat((im_hidden, pose_ins), dim=1)
-        ff2_out = self.ff2(im_and_pose)
+        return self.poseOnlyff(pose_ins)
+        # im_embedding = self.convLayers(img_ins)
+        # flattened_emb = torch.flatten(im_embedding, 1)
+        # im_hidden = self.ff1(flattened_emb)
+        # im_and_pose = torch.cat((im_hidden, pose_ins), dim=1)
+        # ff2_out = self.ff2(im_and_pose)
 
-        return ff2_out
+        # return ff2_out
 
 class PosePlusStateNet(nn.Module):
     def __init__(self, hidden_dim):

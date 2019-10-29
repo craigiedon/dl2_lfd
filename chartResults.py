@@ -64,6 +64,9 @@ def plot_csv_train_val(csv_path, save_path=None, show_fig=False):
     for i, (t_col, v_col) in enumerate(zip(train_cols, val_cols)):
         n_rows = ceil(len(train_cols) / 3)
         n_cols = np.min([len(train_cols), 3])
+        # print("making plot {}".format(i))
+        # print(df[t_col])
+        # print(df[v_col])
         plt.subplot(n_rows, n_cols, i + 1)
         plt.plot(df[t_col], label=t_col)
         plt.plot(df[v_col], label=v_col)
@@ -77,9 +80,10 @@ def plot_csv_train_val(csv_path, save_path=None, show_fig=False):
         plt.savefig(save_path)
 
     if show_fig:
+        print("showing figure")
         plt.show()
 
-    plt.close()
+    # plt.close()
 
 def plot_vae_metrics(csv_path, save_path=None, show_fig=False):
     df = pd.read_csv(csv_path, sep=",")
@@ -282,7 +286,7 @@ def chart_pred_goal_pose(model_path, demo_path, demo_num):
 
     train_paths = image_demo_paths(exp_config["demo_folder"], im_params["file_glob"], from_demo=demo_num, to_demo=demo_num + 1)
     # train_set = PoseAndGoal(train_paths, "l_wrist_roll_link", "r_wrist_roll_link", skip_count=10)
-    train_set = ImagePoseFuturePose(train_paths, "l_wrist_roll_link", get_trans(im_params, distorted=False), skip_count=10)
+    train_set = ImagePoseFuturePose(train_paths, "l_wrist_roll_link", get_trans(im_params, distorted=False), skip_count=5)
     demo_loader = DeviceDataLoader(DataLoader(train_set, exp_config["batch_size"], shuffle=False), torch.device("cuda"))
 
     # model = PosePlusStateNet(100)

@@ -50,15 +50,15 @@ if __name__ == "__main__":
     model = ImagePlusPoseNet((im_params["resize_height"], im_params["resize_width"]), 100)
     model.to(torch.device("cuda"))
 
-    train_paths = image_demo_paths(exp_config["demo_folder"], im_params["file_glob"], from_demo=0, to_demo=80)
+    train_paths = image_demo_paths(exp_config["demo_folder"], im_params["file_glob"], from_demo=0, to_demo=75)
     train_set = ImagePoseFuturePose(train_paths, "l_wrist_roll_link", get_trans(im_params, distorted=False), skip_count=5)
     train_loader = DeviceDataLoader(DataLoader(train_set, exp_config["batch_size"], shuffle=True), torch.device("cuda"))
 
     # for i in range(0, len(train_set), 40):
     #     show_torched_im(train_set[i][0])
 
-    val_paths = image_demo_paths(exp_config["demo_folder"], im_params["file_glob"], from_demo=80)
-    val_set = ImagePoseFuturePose(val_paths, "l_wrist_roll_link", get_trans(im_params, distorted=True), skip_count=5)
+    val_paths = image_demo_paths(exp_config["demo_folder"], im_params["file_glob"], from_demo=75)
+    val_set = ImagePoseFuturePose(val_paths, "l_wrist_roll_link", get_trans(im_params, distorted=False), skip_count=5)
     val_loader = DeviceDataLoader(DataLoader(val_set, exp_config["batch_size"], shuffle=False), torch.device("cuda"))
 
 
@@ -67,7 +67,7 @@ if __name__ == "__main__":
     # joint_weights = torch.linspace(10, 1, len(exp_config["nn_joint_names"]), device=torch.device("cuda"))
     loss_criterion = nn.L1Loss()
 
-    results_folder = "logs/cup-pour-undistorted-{}".format(t_stamp())
+    results_folder = "logs/cup-pour-poseOnly-{}".format(t_stamp())
     if not os.path.exists(results_folder):
         os.makedirs(results_folder)
 
