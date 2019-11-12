@@ -41,16 +41,19 @@ def rbf_torch(x, h, c):
     return torch.exp(-h * (x - c)**2)
 
 class DMP():
-    def __init__(self, y0, goal, num_basis_funcs=5, dt=0.01, d=2, weights=None, jnames=None):
-        self.ay = np.ones(d) * 25
+    def __init__(self, num_basis_funcs=5, dt=0.01, d=2, weights=None):
+        # self.ay = np.ones(d) * 25
+        # self.by = self.ay / 4.0
+        self.ay = 25
         self.by = self.ay / 4.0
+
         self.dt = dt
         self.T = timesteps(dt)
         # print("Timesteps {}".format(self.T))
         self.n_basis_funcs = num_basis_funcs
         self.dims = d
 
-        self.joint_names = jnames if jnames is not None else []
+        # self.joint_names = jnames if jnames is not None else []
 
         self.cs = CanonicalSystem(dt=self.dt)
 
@@ -64,9 +67,13 @@ class DMP():
         self.h = 1.0 / (np.append(self.h, self.h[-1]))
         # print("Widths: shape - {} values - {}".format(self.h.shape, self.h))
 
+        # Torch equivalents
+        self.t_h = torch.from_numpy(self.h).to(dtype=torch.float, device=torch.device("cuda"))
+        self.t_c = torch.from_numpy(self.c).to(dtype=torch.float, device=torch.device("cuda"))
+
         # Start and goal points
-        self.goal = goal
-        self.y0 = y0
+        # self.goal = goal
+        # self.y0 = y0
 
         self.weights = weights
 
@@ -100,28 +107,24 @@ class DMP():
 
         return x_next, y_next, dy_next, ddy_next
 
-    def step_torch(self, x, y, dy, tau=1.0):
+    def step_torch(self, starts, goals, x, y, dy, tau=1.0):
         # step canonical system
         x_next = canonical_step(x, self.cs.ax, self.cs.dt, tau)
 
         # generate basis function activation
-        t_h = torch.from_numpy(self.h).to(dtype=torch.float)
-        t_c = torch.from_numpy(self.c).to(dtype=torch.float)
-        psi = rbf_torch(x_next, t_h, t_c)
+        psi = rbf_torch(x_next, self.t_h, self.t_c)
 
-        f = torch.zeros(self.dims)
-        for d in range(self.dims):
-            # generate the forcing term
-            # print(torch.dot(psi, self.weights[d]))
-            f[d] = x_next * (torch.dot(psi, self.weights[d])) / torch.sum(psi)
+        f = x_next * torch.matmul(self.weights, psi) / torch.sum(psi)
 
         # DMP acceleration
         # Sugar notation to agree with Pastor (2008) notation
-        K = torch.from_numpy(self.ay * self.by).to(dtype=torch.float)
-        D = torch.from_numpy(self.ay).to(dtype=torch.float)
+        # K = torch.from_numpy(self.ay * self.by).to(dtype=torch.float, device=torch.device("cuda"))
+        # D = torch.from_numpy(self.ay).to(dtype=torch.float, device=torch.device("cuda"))
+        K = self.ay * self.by
+        D = self.ay
 
         # Modified generalized
-        ddy_next = (K * (self.goal - y) - D * dy / tau - K * (self.goal - self.y0) * x_next + K * f) * tau
+        ddy_next = (K * (goals - y) - D * dy / tau - K * (goals - starts) * x_next + K * f) * tau
 
         # Original Form
         # ddy_next = K * (self.goal - y) - D * dy + (self.goal - self.y0) * f
@@ -149,17 +152,25 @@ class DMP():
 
         return y_track, dy_track, ddy_track
 
-    def rollout_torch(self, tau=1.0):
+    def rollout_torch(self, starts, goals, tau=1.0):
         scaled_time = int(self.T / tau)
-        y_track = torch.zeros((scaled_time, self.dims))
-        dy_track = torch.zeros((scaled_time, self.dims))
-        ddy_track = torch.zeros((scaled_time, self.dims))
-        y_track[0] = self.y0
+        batch_size = starts.shape[0]
+        y_track = torch.zeros((batch_size, scaled_time, self.dims), device=torch.device("cuda"))
+        dy_track = torch.zeros((batch_size, scaled_time, self.dims), device=torch.device("cuda"))
+        ddy_track = torch.zeros((batch_size, scaled_time, self.dims), device=torch.device("cuda"))
+
+        y_track[:, 0] = starts.reshape(batch_size, -1)
 
         x = self.cs.start_x
 
         for t in range(1, scaled_time):
-            x, y_track[t], dy_track[t], ddy_track[t] = self.step_torch(x, y_track[t-1], dy_track[t-1], tau)
+            x, y_track[:, t], dy_track[:, t], ddy_track[:,t] = self.step_torch(
+                starts.view(batch_size, -1),
+                goals.view(batch_size, -1),
+                x,
+                y_track[:, t-1],
+                dy_track[:, t-1],
+                tau)
 
         return y_track, dy_track, ddy_track
 
