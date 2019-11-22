@@ -15,30 +15,10 @@ from os.path import join
 from glob import glob
 from math import ceil
 import pickle
-from scipy.spatial.transform import Rotation as R
 from IPython.display import display, clear_output, update_display
 from time import time
 
 
-def quat_pose_to_rpy(quat_pose, normalize):
-    pos, quat = quat_pose[0:3], quat_pose[3:]
-    rpy = R.from_quat(quat).as_euler("xyz")
-    if normalize:
-        rpy = rpy / np.pi
-
-    return np.concatenate((pos, rpy))
-
-def load_pose_history(demos_folder, demo_num, ee_name, convert_to_rpy=True):
-    demo_path = os.listdir(demos_folder)[demo_num]
-    ee_template = join(demos_folder, demo_path, "{}*".format(ee_name))
-    sorted_pose_paths = sorted(glob(ee_template))
-
-    if convert_to_rpy:
-        pose_history = np.stack([quat_pose_to_rpy(np.genfromtxt(p), False) for p in sorted_pose_paths])
-    else:
-        pose_history = np.stack([np.genfromtxt(p) for p in sorted_pose_paths])
-
-    return pose_history
 
 def load_demos(demos_folder):
     start_state_paths = sorted([d for d in os.listdir(demos_folder) if "start-state" in d])
@@ -50,13 +30,6 @@ def load_demos(demos_folder):
     return start_states, rollouts
 
 
-def interpolated_path(recorded_ys, dt, T):
-    demos, num_points, dims = recorded_ys.shape
-    x = np.linspace(0, 1, num_points)
-
-    path_gen = interp1d(x, recorded_ys, axis=1)
-    path = path_gen([t*dt for t in range(T)])
-    return path
 
 
 def dmp_nn(in_dim, hidden_dim, out_dims):
@@ -163,9 +136,9 @@ model.load_state_dict(
 
 %matplotlib auto
 plt.style.use('seaborn')
-for d in range(1, 10):
+for d in range(5, 6):
     demo_num = d
-    plt.subplot(3,3, d)
+    # plt.subplot(3,3, d)
     val_starts, val_rollout = val_set[demo_num]
     learned_weights = model(val_starts.view(-1))
 
@@ -184,9 +157,9 @@ for d in range(1, 10):
     plt.plot(val_rollout.detach().cpu()[:, 0], val_rollout.detach().cpu()[:, 1], label="Raw", c='orange')
     plt.scatter(val_starts[:, 0].detach().cpu(), val_starts[:, 1].detach().cpu(), c='r', marker='x')
     plt.xlabel("X")
-    plt.xlim(0.0, 1.0)
+    plt.xlim(-0.1, 1.1)
     plt.ylabel("Y")
-    plt.ylim(0.0, 1.0)
+    plt.ylim(-0.1, 1.1)
     plt.legend()
     plt.show()
 

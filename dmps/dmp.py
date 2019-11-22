@@ -4,6 +4,25 @@ import matplotlib.pyplot as plt
 import pickle
 from math import ceil
 import torch
+import os
+from os.path import join
+
+def interpolated_path(recorded_ys, dt, T):
+    demos, num_points, dims = recorded_ys.shape
+    x = np.linspace(0, 1, num_points)
+
+    path_gen = interp1d(x, recorded_ys, axis=1)
+    path = path_gen([t*dt for t in range(T)])
+    return path
+
+def load_dmp_demos(demos_folder):
+    start_state_paths = sorted([d for d in os.listdir(demos_folder) if "start-state" in d])
+    rollout_paths = sorted([d for d in os.listdir(demos_folder) if "rollout" in d])
+
+    start_states = np.stack([np.loadtxt(join(demos_folder, sp), ndmin=2) for sp in start_state_paths])
+    rollouts = np.stack([np.loadtxt(join(demos_folder, rp), ndmin=2) for rp in rollout_paths])
+
+    return start_states, rollouts
 
 class CanonicalSystem():
 
@@ -41,31 +60,20 @@ def rbf_torch(x, h, c):
     return torch.exp(-h * (x - c)**2)
 
 class DMP():
-    def __init__(self, num_basis_funcs=5, dt=0.01, d=2, weights=None):
-        # self.ay = np.ones(d) * 25
-        # self.by = self.ay / 4.0
+    def __init__(self, num_basis_funcs, dt, d):
         self.ay = 25
         self.by = self.ay / 4.0
 
         self.dt = dt
         self.T = timesteps(dt)
-        # print("Timesteps {}".format(self.T))
         self.n_basis_funcs = num_basis_funcs
         self.dims = d
 
-        # self.joint_names = jnames if jnames is not None else []
-
         self.cs = CanonicalSystem(dt=self.dt)
 
-        # Spacing centres out equally isn't great if x is decaying non_linearly, so instead try exponential spacing
         self.c = np.exp(-self.cs.ax * np.linspace(0, 1, self.n_basis_funcs))
-        # print("Centres: {}".format(self.c))
-        # self.h = np.ones(self.n_basis_funcs) * self.n_basis_funcs**1.5 / (self.c * self.cs.ax)
-        # self.h = np.ones(self.n_basis_funcs) * self.n_basis_funcs / (self.c)
-        # self.h = np.ones(self.n_basis_funcs) * self.n_basis_funcs ** 1.5 / self.c / self.cs.ax
         self.h = np.square(np.diff(self.c) * 0.55)
         self.h = 1.0 / (np.append(self.h, self.h[-1]))
-        # print("Widths: shape - {} values - {}".format(self.h.shape, self.h))
 
         # Torch equivalents
         self.t_h = torch.from_numpy(self.h).to(dtype=torch.float, device=torch.device("cuda"))
@@ -74,8 +82,6 @@ class DMP():
         # Start and goal points
         # self.goal = goal
         # self.y0 = y0
-
-        self.weights = weights
 
 
     def step(self, x, y, dy, tau=1.0):
@@ -107,14 +113,14 @@ class DMP():
 
         return x_next, y_next, dy_next, ddy_next
 
-    def step_torch(self, starts, goals, x, y, dy, tau=1.0):
+    def step_torch(self, starts, goals, x, y, dy, weights, tau=1.0):
         # step canonical system
         x_next = canonical_step(x, self.cs.ax, self.cs.dt, tau)
 
         # generate basis function activation
         psi = rbf_torch(x_next, self.t_h, self.t_c)
 
-        f = x_next * torch.matmul(self.weights, psi) / torch.sum(psi)
+        f = x_next * torch.matmul(weights, psi) / torch.sum(psi)
 
         # DMP acceleration
         # Sugar notation to agree with Pastor (2008) notation
@@ -152,7 +158,7 @@ class DMP():
 
         return y_track, dy_track, ddy_track
 
-    def rollout_torch(self, starts, goals, tau=1.0):
+    def rollout_torch(self, starts, goals, weights, tau=1.0):
         scaled_time = int(self.T / tau)
         batch_size = starts.shape[0]
         y_track = torch.zeros((batch_size, scaled_time, self.dims), device=torch.device("cuda"))
@@ -170,6 +176,7 @@ class DMP():
                 x,
                 y_track[:, t-1],
                 dy_track[:, t-1],
+                weights,
                 tau)
 
         return y_track, dy_track, ddy_track

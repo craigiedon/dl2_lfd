@@ -8,6 +8,7 @@ import json
 import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
 from helper_funcs.utils import find_last
+from helper_funcs.conversions import quat_np_pose_to_rpy
 from glob import glob
 from scipy.spatial.transform import Rotation as R
 
@@ -483,3 +484,16 @@ def show_torched_im(torched_im):
     processed_im = nn_input_to_imshow(torched_im)
     plt.imshow(processed_im)
     plt.show()
+
+
+def load_pose_history(demos_folder, demo_num, ee_name, convert_to_rpy=True):
+    demo_path = os.listdir(demos_folder)[demo_num]
+    ee_template = join(demos_folder, demo_path, "{}*".format(ee_name))
+    sorted_pose_paths = sorted(glob(ee_template))
+
+    if convert_to_rpy:
+        pose_history = np.stack([quat_pose_to_rpy(np.genfromtxt(p), False) for p in sorted_pose_paths])
+    else:
+        pose_history = np.stack([np.genfromtxt(p) for p in sorted_pose_paths])
+
+    return pose_history
