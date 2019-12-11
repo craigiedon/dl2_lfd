@@ -88,12 +88,8 @@ class OutputMoreDummy:
         self.epsilon = epsilon
 
     def condition(self, zs, ins, targets, net, rollout_func):
-        z_in = zs[0]
-        weights = net(z_in)
-        return ltd.LEQ(ltd.TermStatic(z_in), ltd.TermStatic(weights))
+        weights = net(zs)
+        return ltd.LEQ(ltd.TermStatic(zs), ltd.TermStatic(weights))
 
     def domains(self, ins, targets):
-        low_ins = ins - self.epsilon
-        high_ins = ins + self.epsilon
-        return [Box(low_ins, high_ins)]
-
+        return cs.fully_global_ins(ins, self.epsilon)
