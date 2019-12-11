@@ -15,7 +15,7 @@ class DMPNN(nn.Module):
         )
 
     def forward(self, ins):
-        flat_in = ins.view(ins.shape[0], -1)
+        flat_in = ins.reshape(ins.shape[0], -1)
         flat_out = self.ff(flat_in)
         return flat_out.view(-1, self.dmp_dims, self.n_basis_fs)
 

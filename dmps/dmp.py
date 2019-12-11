@@ -79,10 +79,6 @@ class DMP():
         self.t_h = torch.from_numpy(self.h).to(dtype=torch.float, device=torch.device("cuda"))
         self.t_c = torch.from_numpy(self.c).to(dtype=torch.float, device=torch.device("cuda"))
 
-        # Start and goal points
-        # self.goal = goal
-        # self.y0 = y0
-
 
     def step(self, x, y, dy, tau=1.0):
         # step canonical system
@@ -124,8 +120,6 @@ class DMP():
 
         # DMP acceleration
         # Sugar notation to agree with Pastor (2008) notation
-        # K = torch.from_numpy(self.ay * self.by).to(dtype=torch.float, device=torch.device("cuda"))
-        # D = torch.from_numpy(self.ay).to(dtype=torch.float, device=torch.device("cuda"))
         K = self.ay * self.by
         D = self.ay
 
@@ -215,7 +209,6 @@ def imitate_path(y_d, dmp):
     ddy_d = np.diff(dy_d) / dmp.dt
     ddy_d = np.hstack((np.zeros((dims, 1)), ddy_d))
 
-    # find the force required to move along this trajectory
     K = dmp.ay * dmp.by
     D = dmp.ay
 
