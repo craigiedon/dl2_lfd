@@ -7,13 +7,6 @@ import torch
 import os
 from os.path import join
 
-def interpolated_path(recorded_ys, dt, T):
-    demos, num_points, dims = recorded_ys.shape
-    x = np.linspace(0, 1, num_points)
-
-    path_gen = interp1d(x, recorded_ys, axis=1)
-    path = path_gen([t*dt for t in range(T)])
-    return path
 
 def load_dmp_demos(demos_folder):
     start_state_paths = sorted([d for d in os.listdir(demos_folder) if "start-state" in d])
@@ -31,12 +24,11 @@ class CanonicalSystem():
         self.ax = ax
         self.dt = dt
         self.start_x = start_x
-        self.T = timesteps(dt)
 
 
 
-def canonical_rollout(start_val, ax, dt, tau=1.0):
-    T = timesteps(dt)
+def canonical_rollout(start_val, ax, dt, time_span=1.0, tau=1.0):
+    T = int(time_span / dt)
     x_t = np.zeros(T)
     x_t[0] = start_val
 
@@ -47,10 +39,6 @@ def canonical_rollout(start_val, ax, dt, tau=1.0):
 
 def canonical_step(x, ax, dt, tau=1.0):
     return x - (ax * x * dt) * tau
-
-
-def timesteps(dt):
-    return int(1.0 / dt)
 
 
 def rbf(x, h, c):
@@ -65,7 +53,6 @@ class DMP():
         self.by = self.ay / 4.0
 
         self.dt = dt
-        self.T = timesteps(dt)
         self.n_basis_funcs = num_basis_funcs
         self.dims = d
 
@@ -136,34 +123,34 @@ class DMP():
         return x_next, y_next, dy_next, ddy_next
 
 
-    def rollout(self, tau=1.0):
-        scaled_time = int(self.T / tau)
+    def rollout(self, time_span=1.0, tau=1.0):
+        scaled_tsteps = int((time_span / self.dt) / tau)
         # set up tracking vectors
-        y_track = np.zeros((scaled_time, self.dims))
-        dy_track = np.zeros((scaled_time, self.dims))
-        ddy_track = np.zeros((scaled_time, self.dims))
+        y_track = np.zeros((scaled_tsteps, self.dims))
+        dy_track = np.zeros((scaled_tsteps, self.dims))
+        ddy_track = np.zeros((scaled_tsteps, self.dims))
 
         y_track[0] = self.y0
 
         x = self.cs.start_x
 
-        for t in range(1, scaled_time):
+        for t in range(1, scaled_tsteps):
             x, y_track[t], dy_track[t], ddy_track[t] = self.step(x, y_track[t-1], dy_track[t-1], tau)
 
         return y_track, dy_track, ddy_track
 
-    def rollout_torch(self, starts, goals, weights, tau=1.0):
-        scaled_time = int(self.T / tau)
+    def rollout_torch(self, starts, goals, weights, time_span=1.0, tau=1.0):
+        scaled_tsteps = int((time_span / self.dt) / tau)
         batch_size = starts.shape[0]
-        y_track = torch.zeros((batch_size, scaled_time, self.dims), device=torch.device("cuda"))
-        dy_track = torch.zeros((batch_size, scaled_time, self.dims), device=torch.device("cuda"))
-        ddy_track = torch.zeros((batch_size, scaled_time, self.dims), device=torch.device("cuda"))
+        y_track = torch.zeros((batch_size, scaled_tsteps, self.dims), device=torch.device("cuda"))
+        dy_track = torch.zeros((batch_size, scaled_tsteps, self.dims), device=torch.device("cuda"))
+        ddy_track = torch.zeros((batch_size, scaled_tsteps, self.dims), device=torch.device("cuda"))
 
         y_track[:, 0] = starts.reshape(batch_size, -1)
 
         x = self.cs.start_x
 
-        for t in range(1, scaled_time):
+        for t in range(1, scaled_tsteps):
             x, y_track[:, t], dy_track[:, t], ddy_track[:,t] = self.step_torch(
                 starts.view(batch_size, -1),
                 goals.view(batch_size, -1),
