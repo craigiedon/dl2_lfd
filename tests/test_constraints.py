@@ -100,21 +100,21 @@ class TestConstraints(unittest.TestCase):
         self.assertGreater(loss, 0.0)
 
     def test_eventuallyReach_pointOnRollout_zeroCost(self):
-        er = cs.EventuallyReach(2, 0.1)
+        er = cs.EventuallyReach([2], 0.1)
         ins = None
         zs = torch.tensor([
             [[1.0], [10.0], [4.0]]
         ])
         targets = None
         net = lambda x : x
-        rollout_func = lambda s1, s2, x : [x[:, er.reach_id].expand(1, 20, 1)]
+        rollout_func = lambda s1, s2, x : [x[:, er.reach_ids].expand(1, 20, 1)]
 
         ltd_const = er.condition(zs, ins, targets, net, rollout_func)
         loss = ltd_const.loss(0).item()
         self.assertEqual(loss, 0.0)
 
     def test_eventuallyReach_multipleClosePoints_costIsClosestDistance(self):
-        er = cs.EventuallyReach(2, 0.1)
+        er = cs.EventuallyReach([2], 0.1)
         ins = None
         zs = torch.tensor([
             [[1.0], [10.0], [4.0]]
@@ -127,6 +127,34 @@ class TestConstraints(unittest.TestCase):
         loss = ltd_const.loss(0).item()
         self.assertGreaterEqual(loss, 1.0)
         self.assertLessEqual(loss, 2.0)
+
+    def test_eventuallyReach_manyReachIds_allReached_zeroCost(self):
+        er = cs.EventuallyReach([1, 2], 0.1)
+        ins = None
+        zs = torch.tensor([
+            [[1.0], [4.0], [7.0], [10.0]]
+        ])
+        targets = None
+        net = lambda x : x
+        rollout_func = lambda s1, s2, x : [torch.tensor([2.0, 4.0, 7.0]).reshape(1, 3, 1)]
+
+        ltd_const = er.condition(zs, ins, targets, net, rollout_func)
+        loss = ltd_const.loss(0).item()
+        self.assertEqual(loss, 0.0)
+
+    def test_eventuallyReach_manyReach_ids_close_closestDistCost(self):
+        er = cs.EventuallyReach([1, 2], 0.1)
+        ins = None
+        zs = torch.tensor([
+            [[1.0], [4.0], [7.0], [10.0]]
+        ])
+        targets = None
+        net = lambda x : x
+        rollout_func = lambda s1, s2, x : [torch.tensor([2.0, 10.0]).reshape(1, 2, 1)]
+
+        ltd_const = er.condition(zs, ins, targets, net, rollout_func)
+        loss = ltd_const.loss(0).item()
+        self.assertAlmostEqual(loss, 3.0, 4)
 
     # Don't Tip Early (this would be a good one to benefit from the STL time-robustness thing...)
     def test_dontTipEarly_rotationEarly_costIsRotationDiff(self):
