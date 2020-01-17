@@ -47,14 +47,14 @@ loss_fn = rollout_error
 
 # Construct a constraint for the "eventually reach this point" constraint.
 # constraint = constraints.EventuallyReach([1], 0.1)
-constraint = constraints.AvoidPoint(2, 0.1, 1e-2)
-# constraint = None
+# constraint = constraints.AvoidPoint(2, 0.1, 1e-2)
+constraint = None
 
 def batch_learn(data_loader, loss_fn, constraint, optimizer=None):
     losses = []
     for batch_idx, (starts, rollouts) in enumerate(data_loader):
         with autograd.detect_anomaly():
-            print("Model Params {} \n".format(list(model.parameters())))
+            #print("Model Params {} \n".format(list(model.parameters())))
             batch_size, T, dims = rollouts.shape
             # print("B: {}".format(batch_idx))
 

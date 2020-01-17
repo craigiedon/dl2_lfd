@@ -195,6 +195,7 @@ class TestConstraints(unittest.TestCase):
         ltd_const = dontTip.condition(zs, ins, targets, net, rollout_func)
         loss = ltd_const.loss(0).item()
         self.assertEqual(loss, 0.0)
+        self.assertTrue(ltd_const.satisfy())
 
     def test_dontTipEarly_rotationMovesAfterClose_costZero(self):
         fixed_orientation = 0.0
