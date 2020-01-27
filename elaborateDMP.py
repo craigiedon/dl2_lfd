@@ -28,7 +28,7 @@ def training_loop(train_set, val_set, constraint, enforce_constraint, adversaria
     optimizer = optim.Adam(model.parameters())
     loss_fn = rollout_error
     train_loader = DataLoader(train_set, shuffle=True, batch_size=32)
-    # val_loader = DataLoader(val_set, shuffle=False, batch_size=32)
+    val_loader = DataLoader(val_set, shuffle=False, batch_size=32)
 
     train_losses, val_losses = [], []
 
@@ -65,20 +65,20 @@ def training_loop(train_set, val_set, constraint, enforce_constraint, adversaria
 
         return np.mean(losses, 0, keepdims=True)
 
-    for epoch in range(300):
+    for epoch in range(100):
 
         # Train loop
         model.train()
         avg_train_loss = batch_learn(train_loader, enforce_constraint, adversarial, True)
 
         # Validation Loop
-        # model.eval()
-        # avg_val_loss = batch_learn(val_loader, loss_fn, constraint, True, False, None)
+        model.eval()
+        avg_val_loss = batch_learn(val_loader, True, False, False)
 
         train_losses.append(avg_train_loss[0])
-        # val_losses.append(avg_val_loss[0])
+        val_losses.append(avg_val_loss[0])
 
-        print("e{}\t t: {}".format(epoch, avg_train_loss[0, :2]))
+        print("e{}\t t: {} v: {}".format(epoch, avg_train_loss[0, :2], avg_val_loss[0, :2]))
         # if epoch % 10 == 0:
         #     torch.save(model.state_dict(), join(results_folder, "learned_model_epoch_{}.pt".format(epoch)))
             
@@ -140,14 +140,10 @@ def training_loop(train_set, val_set, constraint, enforce_constraint, adversaria
     # Load the start states and pose hists
 
 
-# Create train/validation split and loaders
-# num_train = 13
-# num_validation = 1
-
 
 # For each demo, for each instance, for each variation of trained with / without constraint....
 demo_constraints = {
-    "avoid": constraints.AvoidPoint(1, 0.1, 1e-2),
+    "avoid": constraints.AvoidPoint(1, 0.1, 0.1),
     "patrol": constraints.EventuallyReach([1, 2], 0.1),
     "stable": constraints.StayInZone(
                 torch.tensor([0.0, 0.25], device=torch.device("cuda")),
@@ -156,26 +152,60 @@ demo_constraints = {
     "slow": constraints.MoveSlowly(0.01, 0.1)
 }
 
-for demo_type in ["stable", "slow"]:
-    for i in range(20):
-        for enforce_constraint in [True, False]:
-            print("{}, {}, {}".format(demo_type, i, enforce_constraint))
-            demo_folder = "demos/{}".format(demo_type)
+# Generalized Demonstration Loop:
+demo_types = ["avoid"]  # ["avoid", "patrol", "slow", "stable"]
+enforcement_types = ["unconstrained", "train", "adversarial"]
+results_root = "logs/generalized-exps-{}".format(t_stamp())
+for demo_type in demo_types:
+    for enforce_type in enforcement_types:
+        if enforce_type == "unconstrained":
+            enforce, adversarial = False, False
+        if enforce_type == "train":
+            enforce, adversarial = True, False
+        if enforce_type == "adversarial":
+            enforce, adversarial = True, True
+        print("{}, {}".format(demo_type, enforce_type))
+        demo_folder = "demos/{}".format(demo_type)
 
-            t_start_states, t_pose_hists = load_dmp_demos(demo_folder + "/train")
-            t_start_states = np_to_pgpu(t_start_states)
-            t_pose_hists = np_to_pgpu(t_pose_hists)
-            train_set = TensorDataset(t_start_states[i:i+1], t_pose_hists[i:i+1])
+        t_num = 100
+        t_start_states, t_pose_hists = load_dmp_demos(demo_folder + "/train")
+        t_start_states, t_pose_hists = np_to_pgpu(t_start_states), np_to_pgpu(t_pose_hists)
+        train_set = TensorDataset(t_start_states[0:t_num], t_pose_hists[0:t_num])
 
-            # v_start_states, v_pose_hists = load_dmp_demos(demo_folder + "/val")
-            # v_start_states = np_to_pgpu(v_start_states)
-            # v_pose_hists = np_to_pgpu(v_pose_hists)
-            # val_set = TensorDataset(v_start_states, v_pose_hists)
+        v_num = 20
+        v_start_states, v_pose_hists = load_dmp_demos(demo_folder + "/val")
+        v_start_states, v_pose_hists = np_to_pgpu(v_start_states), np_to_pgpu(v_pose_hists)
+        val_set = TensorDataset(v_start_states[0:v_num], v_pose_hists[0:v_num])
 
-            # Create time-stamped results folder (possibly move this out to a util func?)
-            results_folder_variable = "logs/single-shot-experiments/{}-{}-enforce{}".format(demo_type, i, enforce_constraint)
-            os.makedirs(results_folder_variable, exist_ok=True)
+        results_folder = join(results_root, "{}-{}".format(demo_type, enforce))
+        os.makedirs(results_folder, exist_ok=True)
 
-            constraint = demo_constraints[demo_type]
+        constraint = demo_constraints[demo_type]
 
-            learned_model = training_loop(train_set, None, constraint, enforce_constraint, False, results_folder_variable)
+        learned_model = training_loop(train_set, val_set, constraint, enforce, adversarial, results_folder)
+
+
+# Single Demonstration Loop
+# for demo_type in ["slow"]:
+#     for i in range(5):
+#         for enforce_constraint in [True, False]:
+#             print("{}, {}, {}".format(demo_type, i, enforce_constraint))
+#             demo_folder = "demos/{}".format(demo_type)
+
+#             t_start_states, t_pose_hists = load_dmp_demos(demo_folder + "/train")
+#             t_start_states = np_to_pgpu(t_start_states)
+#             t_pose_hists = np_to_pgpu(t_pose_hists)
+#             train_set = TensorDataset(t_start_states[i:i+1], t_pose_hists[i:i+1])
+
+#             # v_start_states, v_pose_hists = load_dmp_demos(demo_folder + "/val")
+#             # v_start_states = np_to_pgpu(v_start_states)
+#             # v_pose_hists = np_to_pgpu(v_pose_hists)
+#             # val_set = TensorDataset(v_start_states, v_pose_hists)
+
+#             # Create time-stamped results folder (possibly move this out to a util func?)
+#             results_folder_variable = "logs/single-shot-experiments/{}-{}-enforce{}".format(demo_type, i, enforce_constraint)
+#             os.makedirs(results_folder_variable, exist_ok=True)
+
+#             constraint = demo_constraints[demo_type]
+
+#             learned_model = training_loop(train_set, None, constraint, enforce_constraint, False, results_folder_variable)
