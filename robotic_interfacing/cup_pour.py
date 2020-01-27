@@ -51,7 +51,7 @@ def cup_pour():
     rospy.init_node('cup_pour', anonymous=True)
     record_publisher = rospy.Publisher('/toggle_recording', Empty, queue_size=10)
 
-    for i in range(7):
+    for i in range(1):
         # Set start points for both arms
         l_start_pos, l_start_rpy = np.array([0.532, 0.4, 0.777])  + (np.random.rand(3) - 0.5) * 0.1, np.array([0.0, 0.0, -np.pi / 2.0])
 
@@ -81,6 +81,7 @@ def cup_pour():
         move_to_pos_rpy(r_group, r_start_pos, r_start_rpy)
 
         plan, _ = l_group.compute_cartesian_path(waypoints,0.01,0.0)
+        print(len(plan.joint_trajectory.points))
         # plan_points = plan.joint_trajectory.points
         # for plan_point in plan_points:
         #     print(plan_point.time_from_start)
