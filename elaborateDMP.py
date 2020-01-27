@@ -143,17 +143,17 @@ def training_loop(train_set, val_set, constraint, enforce_constraint, adversaria
 
 # For each demo, for each instance, for each variation of trained with / without constraint....
 demo_constraints = {
-    "avoid": constraints.AvoidPoint(1, 0.1, 0.1),
-    "patrol": constraints.EventuallyReach([1, 2], 0.1),
+    "avoid": constraints.AvoidPoint(1, 0.1, 1E-2),
+    "patrol": constraints.EventuallyReach([1, 2], 1E-2),
     "stable": constraints.StayInZone(
                 torch.tensor([0.0, 0.25], device=torch.device("cuda")),
                 torch.tensor([1.0, 0.75], device=torch.device("cuda")),
-                0.1),
-    "slow": constraints.MoveSlowly(0.01, 0.1)
+                1E-2),
+    "slow": constraints.MoveSlowly(0.01, 1E-2)
 }
 
 # Generalized Demonstration Loop:
-demo_types = ["avoid"]  # ["avoid", "patrol", "slow", "stable"]
+demo_types = ["patrol", "slow", "stable"]
 enforcement_types = ["unconstrained", "train", "adversarial"]
 results_root = "logs/generalized-exps-{}".format(t_stamp())
 for demo_type in demo_types:
@@ -177,7 +177,7 @@ for demo_type in demo_types:
         v_start_states, v_pose_hists = np_to_pgpu(v_start_states), np_to_pgpu(v_pose_hists)
         val_set = TensorDataset(v_start_states[0:v_num], v_pose_hists[0:v_num])
 
-        results_folder = join(results_root, "{}-{}".format(demo_type, enforce))
+        results_folder = join(results_root, "{}-{}".format(demo_type, enforce_type))
         os.makedirs(results_folder, exist_ok=True)
 
         constraint = demo_constraints[demo_type]

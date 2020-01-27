@@ -50,7 +50,7 @@ def simpleCurveWithAvoidPoint(start_range, goal_range, attractor_range, plot=Fal
     distractor_1 = unif([0.1, 0.1], [0.9, 0.9])
     distractor_2 = unif([0.1, 0.1], [0.9, 0.9])
 
-    ts = np.array([0.0, unif(0.4, 0.6), 1.0])
+    ts = np.array([0.0, 0.5, 1.0])
 
     relevant_keypoints = np.array([start, attractor_point, goal])
     all_features = np.array([start, avoid_point, attractor_point, distractor_1, distractor_2, goal])
@@ -85,7 +85,7 @@ def simpleCurveWithTwoPatrols(start_range, goal_range, ar_1, ar_2, plot=False):
     distractor_1 = unif([0.1, 0.1], [0.9, 0.9])
     distractor_2 = unif([0.1, 0.1], [0.9, 0.9])
 
-    ts = np.array([0.0, unif(0.2, 0.3), unif(0.6, 0.8), 1.0])
+    ts = np.array([0.0, 0.25, 0.75, 1.0])
     relevant_keypoints = np.array([start, attractor_1, attractor_2, goal])
     spline = CubicSpline(ts, relevant_keypoints)
 
@@ -117,7 +117,7 @@ def movingSinWave(start_range, goal_range, attractor_range, plot=False):
     distractor_1 = unif([0.1, 0.1], [0.9, 0.9])
     distractor_2 = unif([0.1, 0.1], [0.9, 0.9])
 
-    ts = np.array([0.0, unif(0.4, 0.6), 1.0])
+    ts = np.array([0.0, 0.5, 1.0])
     relevant_keypoints = np.array([start, attractor, goal])
     spline = CubicSpline(ts, relevant_keypoints)
 
@@ -152,7 +152,7 @@ def unevenSpeeds(start_range, goal_range, attractor_range, plot=False):
     distractor_1 = unif([0.1, 0.1], [0.9, 0.9])
     distractor_2 = unif([0.1, 0.1], [0.9, 0.9])
 
-    ts = np.array([0.0, unif(0.4, 0.6), 1.0])
+    ts = np.array([0.0, 0.5, 1.0])
     relevant_keypoints = np.array([start, attractor, goal])
     spline = CubicSpline(ts, relevant_keypoints)
 

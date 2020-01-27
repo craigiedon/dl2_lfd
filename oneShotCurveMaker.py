@@ -42,7 +42,8 @@ def gen_multiple_curves(demo_name, num_demos, curve_fun, *curve_args):
     plt.show()
 
 
-gen_multiple_curves("avoid", 100, cf.simpleCurveWithAvoidPoint, ([0.0, 0.0], [0.1,0.1]), ([0.9, 0.9], [1.0, 1.0]), ([0.25, 0.25], [0.8, 0.8]), False)
-gen_multiple_curves("patrol", 100, cf.simpleCurveWithTwoPatrols, ([0.0, 0.0], [0.1, 0.1]), ([0.9, 0.9], [1.0, 1.0]), ([0.2, 0.2], [0.4, 0.4]), ([0.6, 0.6], [0.8, 0.8]), False)
-gen_multiple_curves("stable", 100, cf.movingSinWave, ([0.0, 0.45], [0.0, 0.55]), ([1.0, 0.4], [1.0, 0.6]), ([0.2, 0.3], [0.4, 0.7]), False)
-gen_multiple_curves("slow", 100, cf.unevenSpeeds, ([0.0, 0.0], [0.1,0.1]), ([0.9, 0.9], [1.0, 1.0]), ([0.25, 0.25], [0.8, 0.8]), False)
+show_plots = False
+gen_multiple_curves("avoid", 1000, cf.simpleCurveWithAvoidPoint, ([0.0, 0.0], [0.1,0.1]), ([0.9, 0.9], [1.0, 1.0]), ([0.25, 0.25], [0.8, 0.8]), show_plots)
+gen_multiple_curves("patrol", 1000, cf.simpleCurveWithTwoPatrols, ([0.0, 0.0], [0.1, 0.1]), ([0.9, 0.9], [1.0, 1.0]), ([0.2, 0.2], [0.4, 0.4]), ([0.6, 0.6], [0.8, 0.8]), show_plots)
+gen_multiple_curves("stable", 1000, cf.movingSinWave, ([0.0, 0.45], [0.0, 0.55]), ([1.0, 0.4], [1.0, 0.6]), ([0.2, 0.3], [0.4, 0.7]), show_plots)
+gen_multiple_curves("slow", 1000, cf.unevenSpeeds, ([0.0, 0.0], [0.1,0.1]), ([0.9, 0.9], [1.0, 1.0]), ([0.25, 0.25], [0.8, 0.8]), show_plots)
