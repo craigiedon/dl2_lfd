@@ -19,22 +19,28 @@ def quat_pose_to_rpy(quat_pose, normalize):
 
     return np.concatenate((pos, rpy))
 
-def load_pose_history(demos_folder, demo_num, ee_name):
+def load_pose_history(demos_folder, demo_num, ee_name, convert_to_rpy=True):
     demo_path = os.listdir(demos_folder)[demo_num]
     ee_template = join(demos_folder, demo_path, "{}*".format(ee_name))
     sorted_pose_paths = sorted(glob(ee_template))
-    pose_history = np.stack([quat_pose_to_rpy(np.genfromtxt(p), False) for p in sorted_pose_paths])
+
+    if convert_to_rpy:
+        pose_history = np.stack([quat_pose_to_rpy(np.genfromtxt(p), False) for p in sorted_pose_paths])
+    else:
+        pose_history = np.stack([np.genfromtxt(p) for p in sorted_pose_paths])
+
     return pose_history
+
 
 def fit_dmp(pose_path):
     start_pose, goal_pose = pose_path[0, :], pose_path[-1, :]
     dims = pose_path.shape[1]
 
-    dmp = DMP(start_pose, goal_pose, num_basis_funcs=500, dt=0.01, d=dims)
+    dmp = DMP(start_pose, goal_pose, num_basis_funcs=50, dt=0.01, d=dims)
     _, weights = imitate_path(pose_path, dmp)
     dmp.weights = weights
 
-    print("DMP Goal Original: {}", dmp.goal)
+    # print("DMP Goal Original: {}", dmp.goal)
 
     y_r = dmp.rollout()[0]
 
@@ -44,7 +50,7 @@ def fit_dmp(pose_path):
     # dmp.dt = 0.01
     # dmp.T /= 2
     # dmp.dt *= 2
-    tau = 10
+    tau = 1
     y_r_shifted = dmp.rollout(tau=tau)[0]
 
     # print("DMP Goal Post y0 Shift: {}", dmp.goal)
@@ -58,10 +64,12 @@ def fit_dmp(pose_path):
         plt.subplot(2,ceil(dims / 2),d + 1)
         dmp_timescale = np.linspace(0, 1, y_r.shape[0])
         plt.plot(dmp_timescale, y_r[:, d], label="DMP")
+        plt.plot()
         # plt.plot(y_r[:, d], label="DMP")
 
         raw_timescale = np.linspace(0, 1, pose_path.shape[0])
         plt.plot(raw_timescale, pose_path[:, d], label="Raw")
+        # plt.scatter(1 - dmp.c, np.ones(dmp.c.shape[0]) * np.mean(pose_path[:, d]), alpha=0.4)
         # plt.plot(pose_path[:, d], label="Raw")
 
         # dmp_shifted_timescale = np.linspace(0, tau, y_r_shifted.shape[0])

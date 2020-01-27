@@ -3,6 +3,19 @@ from scipy.interpolate import interp1d
 import matplotlib.pyplot as plt
 import pickle
 from math import ceil
+import torch
+import os
+from os.path import join
+
+
+def load_dmp_demos(demos_folder):
+    start_state_paths = sorted([d for d in os.listdir(demos_folder) if "start-state" in d])
+    rollout_paths = sorted([d for d in os.listdir(demos_folder) if "rollout" in d])
+
+    start_states = np.stack([np.loadtxt(join(demos_folder, sp), ndmin=2) for sp in start_state_paths])
+    rollouts = np.stack([np.loadtxt(join(demos_folder, rp), ndmin=2) for rp in rollout_paths])
+
+    return start_states, rollouts
 
 class CanonicalSystem():
 
@@ -11,12 +24,11 @@ class CanonicalSystem():
         self.ax = ax
         self.dt = dt
         self.start_x = start_x
-        self.T = timesteps(dt)
 
 
 
-def canonical_rollout(start_val, ax, dt, tau=1.0):
-    T = timesteps(dt)
+def canonical_rollout(start_val, ax, dt, time_span=1.0, tau=1.0):
+    T = int(time_span / dt)
     x_t = np.zeros(T)
     x_t[0] = start_val
 
@@ -29,36 +41,30 @@ def canonical_step(x, ax, dt, tau=1.0):
     return x - (ax * x * dt) * tau
 
 
-def timesteps(dt):
-    return int(1.0 / dt)
-
-
 def rbf(x, h, c):
     return np.exp(-h * (x[:,None] - c)**2)
 
+def rbf_torch(x, h, c):
+    return torch.exp(-h * (x - c)**2)
+
 class DMP():
-    def __init__(self, y0, goal, num_basis_funcs=5, dt=0.01, d=2, jnames=None):
-        self.ay = np.ones(d) * 25
+    def __init__(self, num_basis_funcs, dt, d):
+        self.ay = 25
         self.by = self.ay / 4.0
+
         self.dt = dt
-        self.T = timesteps(dt)
         self.n_basis_funcs = num_basis_funcs
         self.dims = d
 
-        self.joint_names = jnames if jnames is not None else []
-
         self.cs = CanonicalSystem(dt=self.dt)
 
-        # Spacing centres out equally isn't great if x is decaying non_linearly, so instead try exponential spacing
         self.c = np.exp(-self.cs.ax * np.linspace(0, 1, self.n_basis_funcs))
-        self.h = np.ones(self.n_basis_funcs) * self.n_basis_funcs**1.5 / (self.c * self.cs.ax)
-        # self.h = np.ones(self.n_basis_funcs) * self.n_basis_funcs / (self.c)
+        self.h = np.square(np.diff(self.c) * 0.55)
+        self.h = 1.0 / (np.append(self.h, self.h[-1]))
 
-        # Start and goal points
-        self.goal = goal
-        self.y0 = y0
-
-        self.weights = None
+        # Torch equivalents
+        self.t_h = torch.from_numpy(self.h).to(dtype=torch.float, device=torch.device("cuda"))
+        self.t_c = torch.from_numpy(self.c).to(dtype=torch.float, device=torch.device("cuda"))
 
 
     def step(self, x, y, dy, tau=1.0):
@@ -77,11 +83,11 @@ class DMP():
         # Sugar notation to agree with Pastor (2008) notation
         K = self.ay * self.by
         D = self.ay
-        ddy_next = (K * (self.goal - y) - D * dy / tau - K * (self.goal - self.y0) * x_next + K * f) * tau
-        # - K * f = K * (self.goal - y) - D * dy - K * (self.goal - self.y0) * x_next
-        #  f = -(self.goal - y) + (D * dy / K) + (self.goal - self.y0) * x_next + ddy_next / K
-        # ddy_next = self.ay * (self.by * (self.goal - y) - dy) + (self.goal - self.y0) * f
 
+        # Modified generalized
+        ddy_next = (K * (self.goal - y) - D * dy / tau - K * (self.goal - self.y0) * x_next + K * f) * tau
+
+        # Original Form
         # ddy_next = K * (self.goal - y) - D * dy + (self.goal - self.y0) * f
 
         # DMP Velocity
@@ -90,21 +96,72 @@ class DMP():
 
         return x_next, y_next, dy_next, ddy_next
 
-    def rollout(self, tau=1.0):
-        scaled_time = int(self.T / tau)
+    def step_torch(self, starts, goals, x, y, dy, weights, tau=1.0):
+        # step canonical system
+        x_next = canonical_step(x, self.cs.ax, self.cs.dt, tau)
+
+        # generate basis function activation
+        psi = rbf_torch(x_next, self.t_h, self.t_c)
+
+        f = x_next * torch.matmul(weights, psi) / torch.sum(psi)
+
+        # DMP acceleration
+        # Sugar notation to agree with Pastor (2008) notation
+        K = self.ay * self.by
+        D = self.ay
+
+        # Modified generalized
+        ddy_next = (K * (goals - y) - D * dy / tau - K * (goals - starts) * x_next + K * f) * tau
+
+        # Original Form
+        # ddy_next = K * (self.goal - y) - D * dy + (self.goal - self.y0) * f
+
+        # DMP Velocity
+        dy_next = dy + (ddy_next * self.dt) * tau
+        y_next = y + dy_next * self.dt
+
+        return x_next, y_next, dy_next, ddy_next
+
+
+    def rollout(self, time_span=1.0, tau=1.0):
+        scaled_tsteps = int((time_span / self.dt) / tau)
         # set up tracking vectors
-        y_track = np.zeros((scaled_time, self.dims))
-        dy_track = np.zeros((scaled_time, self.dims))
-        ddy_track = np.zeros((scaled_time, self.dims))
+        y_track = np.zeros((scaled_tsteps, self.dims))
+        dy_track = np.zeros((scaled_tsteps, self.dims))
+        ddy_track = np.zeros((scaled_tsteps, self.dims))
 
         y_track[0] = self.y0
 
         x = self.cs.start_x
 
-        for t in range(1, scaled_time):
+        for t in range(1, scaled_tsteps):
             x, y_track[t], dy_track[t], ddy_track[t] = self.step(x, y_track[t-1], dy_track[t-1], tau)
 
         return y_track, dy_track, ddy_track
+
+    def rollout_torch(self, starts, goals, weights, time_span=1.0, tau=1.0):
+        scaled_tsteps = int((time_span / self.dt) / tau)
+        batch_size = starts.shape[0]
+        y_track = torch.zeros((batch_size, scaled_tsteps, self.dims), device=torch.device("cuda"))
+        dy_track = torch.zeros((batch_size, scaled_tsteps, self.dims), device=torch.device("cuda"))
+        ddy_track = torch.zeros((batch_size, scaled_tsteps, self.dims), device=torch.device("cuda"))
+
+        y_track[:, 0] = starts.reshape(batch_size, -1)
+
+        x = self.cs.start_x
+
+        for t in range(1, scaled_tsteps):
+            x, y_track[:, t], dy_track[:, t], ddy_track[:,t] = self.step_torch(
+                starts.view(batch_size, -1),
+                goals.view(batch_size, -1),
+                x,
+                y_track[:, t-1],
+                dy_track[:, t-1],
+                weights,
+                tau)
+
+        return y_track, dy_track, ddy_track
+
 
     
 def interpolated_path(recorded_ys, dt, T):
@@ -139,13 +196,13 @@ def imitate_path(y_d, dmp):
     ddy_d = np.diff(dy_d) / dmp.dt
     ddy_d = np.hstack((np.zeros((dims, 1)), ddy_d))
 
-    # find the force required to move along this trajectory
     K = dmp.ay * dmp.by
     D = dmp.ay
+
+    # Original form...
     # f_target = (ddy_d.T - (K * (y_goal - path.T) - D * dy_d.T))  / (dmp.goal - dmp.y0)
 
-    # f_target =  (ddy_next + D * dy_d) / K - (dmp.goal - path) + (dmp.goal - dmp.y0) * x_track 
-
+    # Modified general one
     f_target = (ddy_d.T + D * dy_d.T) / K - (dmp.goal - path.T) + (dmp.goal - dmp.y0) * np.tile(x_track, (dims, 1)).T
 
     # efficiently generate weights to realize f_target
