@@ -15,6 +15,6 @@
     <node name="data_grabber" 
     pkg="dl2_lfd"
     type="data_grabber.py" 
-    args="--root_path /home/michael/craig_lfd_ws/src/dl2_lfd/demos/cup_pour/ --imtopic /kinect2/qhd/image_color_rect --imtopic /kinect2/qhd/image_depth_rect --imtopic /l_forearm_cam/image_rect_color --imtopic /r_forearm_cam/image_rect_color" 
+    args="--root_path /home/michael/craig_lfd_ws/src/dl2_lfd/demos/cup_pour_prog/ --imtopic /kinect2/qhd/image_color_rect --imtopic /kinect2/qhd/image_depth_rect --imtopic /l_forearm_cam/image_rect_color --imtopic /r_forearm_cam/image_rect_color" 
     output="screen"/> 
 </launch>
