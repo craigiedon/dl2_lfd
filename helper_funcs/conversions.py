@@ -12,4 +12,8 @@ def quat_np_pose_to_rpy(quat_pose, normalize):
 
 
 def np_to_pgpu(np_array):
-    return torch.from_numpy(np_array).to(dtype=torch.float, device=torch.device("cuda"))
+    t = torch.from_numpy(np_array).to(dtype=torch.float)
+    if torch.cuda.is_available():
+        return t.cuda()
+
+    return t

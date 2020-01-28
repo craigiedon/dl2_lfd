@@ -9,7 +9,7 @@ class DMPNN(nn.Module):
         self.ff = nn.Sequential(
             nn.Linear(in_dim, hidden_dim),
             nn.ReLU(),
-            nn.Dropout(),
+            # nn.Dropout(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, dmp_dims * n_basis_fs)

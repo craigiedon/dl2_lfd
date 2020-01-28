@@ -15,7 +15,10 @@ def load_dmp_demos(demos_folder):
     start_states = np.stack([np.loadtxt(join(demos_folder, sp), ndmin=2) for sp in start_state_paths])
     rollouts = np.stack([np.loadtxt(join(demos_folder, rp), ndmin=2) for rp in rollout_paths])
 
-    return start_states, rollouts
+    # Note: May need to make this configurable later
+    interp_rollout = interpolated_path_batch(rollouts, 100)
+
+    return start_states, interp_rollout
 
 class CanonicalSystem():
 
@@ -164,14 +167,30 @@ class DMP():
 
 
     
-def interpolated_path(recorded_ys, dt, T):
+def interpolated_path(recorded_ys, T):
     num_points, dims = recorded_ys.shape[0], recorded_ys.shape[1]
     path = np.zeros((dims, T))
     x = np.linspace(0, 1, num_points)
 
+    dt = 1.0 / (T - 1)
+
     for d in range(dims):
         path_gen = interp1d(x, recorded_ys[:, d])
         path[d] = path_gen([t*dt for t in range(T)])
+
+    return path
+
+def interpolated_path_batch(recorded_ys, T):
+    batch_size, num_points, dims = recorded_ys.shape
+    path = np.zeros((batch_size, T, dims))
+    x = np.linspace(0, 1, num_points)
+
+    dt = 1.0 / (T - 1)
+
+    for b in range(batch_size):
+        for d in range(dims):
+            path_gen = interp1d(x, recorded_ys[b, :, d])
+            path[b, :, d] = path_gen([t*dt for t in range(T)])
 
     return path
 
@@ -183,7 +202,7 @@ def imitate_path(y_d, dmp):
     x_track = canonical_rollout(dmp.cs.start_x, dmp.cs.ax, dmp.dt)
 
     # generate function to interpolate the desired trajectory
-    path = interpolated_path(y_d, dmp.dt, dmp.T)
+    path = interpolated_path(y_d, dmp.T)
     dims =  path.shape[0]
 
     # Calculate the velocity of y_des
