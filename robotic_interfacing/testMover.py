@@ -15,7 +15,7 @@ from load_data import load_rgbd_demos, nn_input_to_imshow
 from helper_funcs.transforms import get_trans, get_grayscale_trans
 from helper_funcs.utils import load_json
 import torch
-from model import ZhangNet, PosePlusStateNet
+from model import ImagePlusPoseNet, PosePlusStateNet
 from mdn import approx_ml
 from cv_bridge import CvBridge
 import cv2
@@ -67,29 +67,13 @@ class RobotStateCache(object):
         quat = pose_stamped.pose.orientation
         rpy = R.from_quat([quat.x, quat.y, quat.z, quat.w]).as_euler('xyz') / np.pi
         self.r_pose = [pos.x, pos.y, pos.z, rpy[0], rpy[1], rpy[2]]
-    
-    # def update_pose_hist(self, pose_stamped):
-    #     pos = pose_stamped.pose.position
-    #     quat = pose_stamped.pose.orientation
-    #     rpy = R.from_quat([quat.x, quat.y, quat.z, quat.w]).as_euler('xyz') / np.pi
-
-    #     self.pose = [pos.x, pos.y, pos.z, rpy[0], rpy[1], rpy[2]]
-
-    #     self.last_quat = [quat.x, quat.y, quat.z, quat.w]
-    #     self.last_pos = [pos.x, pos.y, pos.z]
-        # right_start_pos = np.array([0.576, -0.456, 0.86])
-        # left_start_pos = right_start_pos + np.array([0.1, 0.49, 0.05])
-
-        # print("Start pos: ", left_start_pos)
-        # print("Pos received: ", [pos.x, pos.y, pos.z])
-        # print("Quat received: ", [quat.x, quat.y, quat.z, quat.w])
 
 
 def main(model_path):
     exp_config = load_json("config/experiment_config.json")
     im_params = exp_config["image_config"]
     device = torch.device("cpu")
-    # rgb_trans = get_trans(im_params, distorted=False)
+    rgb_trans = get_trans(im_params, distorted=False)
     # depth_trans = get_grayscale_trans(im_params)
 
     # train_set, train_loader = load_rgbd_demos(
@@ -104,13 +88,13 @@ def main(model_path):
     #     from_demo=0,
     #     to_demo=1)
 
-    model = PosePlusStateNet(100, 2)
+    model = ImagePlusPoseNet((im_params["resize_height"], im_params["resize_width"]), 100)
     model.load_state_dict(torch.load(model_path, map_location=device))
     model.to(device)
     model.eval() # Imporant if you have dropout / batchnorm layers!
 
     state_cache = RobotStateCache()
-    # rgb_sub = rospy.Subscriber('/kinect2/qhd/image_color_rect', Image, state_cache.update_rgb_img)
+    rgb_sub = rospy.Subscriber('/kinect2/qhd/image_color_rect', Image, state_cache.update_rgb_img)
     # depth_sub = rospy.Subscriber('/kinect2/qhd/image_depth_rect', Image, state_cache.update_depth_img)
     l_pose_sub = rospy.Subscriber('/l_wrist_roll_link_as_posestamped', gm.PoseStamped, state_cache.update_l_pose)
     r_pose_sub = rospy.Subscriber('/r_wrist_roll_link_as_posestamped', gm.PoseStamped, state_cache.update_r_pose)
@@ -132,54 +116,46 @@ def main(model_path):
     # print(l_group.get_end_effector_link())
     # print(l_group.get_pose_reference_frame())
 
-    r = rospy.Rate(3)
-    right_start_pos = np.array([0.57622, -0.45568, 0.85959])
-    right_start_quat = np.array([-0.6559, -0.4068, 0.3795, 0.5101])
-
-    left_start_pos = np.array([0.5635, 0.0926, 0.9178])
-    left_start_quat= np.array([0.497706, -0.5401, -0.4214, 0.5319])
+    r = rospy.Rate(1.5)
 
     # left_start_pos = np.array([0.68368, 0.1201, 0.8733])
     # left_start_quat = np.array([0.49261, -0.5294, -0.4433, 0.529611])
 
-    move_to_pos_quat(l_group, left_start_pos, left_start_quat)
-    move_to_pos_quat(r_group, right_start_pos, right_start_quat)
 
-    # Open Loop: Just replicating the training run
-    # i = 0
-    # while not rospy.is_shutdown():
-    #     l_goal = train_set[i][3].numpy().astype(np.float64)
-    #     l_pos = l_goal[0:3]
-    #     l_rpy = l_goal[3:] * np.pi
+    left_start_pos = np.array([6.88e-01, 1.62e-01, 8.38e-01] )# + (np.random.rand(3) - 0.5) * 0.1
+    # left_start_quat = np.array([3.746527957264187553e-02, -1.138874327630349376e-02, -5.064174634791493990e-01, 8.613988634984809378e-01])
+    left_start_rpy = np.array([0.0, 0.0, -np.pi / 2.0])
 
-    #     l_quat = R.from_euler("xyz", l_rpy).as_quat()
+    
+    right_start_pos = np.array([4.350030651697819328e-01, -3.619320769156886275e-01, 9.532789909342967993e-01]) #+ (np.random.rand(3) - 0.5) * 0.1
+    # right_start_quat = np.array([7.092342993967834519e-02,-1.200804160961578410e-01,5.726577827747867389e-01, 8.078450498599533125e-01])
+    # right_start_rpy = tf.transformations.euler_from_quaternion(right_start_quat)
+    right_start_rpy = np.array([0.0, 0.0, np.pi / 2.0])
 
-    #     print("pos", l_pos)
-    #     print("rpy", l_rpy)
-    #     print("quat", l_quat)
 
-    #     move_to_pos_quat(l_group, l_pos, l_quat)
-        
-    #     if i + 5 < len(train_set) - 1:
-    #         i += 5
+    move_to_pos_rpy(l_group, left_start_pos, left_start_rpy)
+    move_to_pos_rpy(r_group, right_start_pos, right_start_rpy)
 
-    #     r.sleep()
+    rospy.sleep(3)
 
     # Closed Loop
     while not rospy.is_shutdown():
         print("Step")
-        if state_cache.l_pose is not None and state_cache.r_pose is not None:
+        if state_cache.l_pose is not None and state_cache.r_pose is not None and state_cache.rgb_im is not None:
             with torch.no_grad():
                 current_pose = torch.tensor(state_cache.l_pose, dtype=torch.float)
                 goal_pose = torch.tensor(state_cache.r_pose, dtype=torch.float)
                 print("Current: {}".format(current_pose))
 
-                pis, stds, mus = model( current_pose.unsqueeze(0), goal_pose.unsqueeze(0))
-                next_pose = approx_ml(pis[0], stds[0], mus[0], num_samples=1000)
+                next_pose = model(rgb_trans(state_cache.rgb_im).unsqueeze(0), current_pose.unsqueeze(0))[0]
+                # pis, stds, mus = model( current_pose.unsqueeze(0), goal_pose.unsqueeze(0))
+                # next_pose = approx_ml(pis[0], stds[0], mus[0], num_samples=1000)
 
                 print("Next {}".format(next_pose))
                 next_position = next_pose[0:3].numpy().astype(np.float64)
                 next_rpy = next_pose[3:].numpy().astype(np.float64) * np.pi
+                # print("For sanity {}\n{}\n{}".format(next_pose[3:], next_pose[3:].numpy(), next_pose[3:].numpy().astype(np.float64)))
+                # print("Next rpy {}".format(next_rpy))
                 next_quat = R.from_euler("xyz", next_rpy).as_quat()
 
                 move_to_pos_quat(l_group, next_position, next_quat)
