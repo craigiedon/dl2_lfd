@@ -21,15 +21,19 @@ import torch
 from os.path import join
 from nns.dmp_nn import DMPNN
 from helper_funcs.conversions import np_to_pgpu
-
-
+from loadAndChartDMP import chart_given_rollout
 
 
 def move_to_pos_rpy(group, pos, rpy):
+    pos = pos.astype(float)
+    rpy = rpy.astype(float)
     quat = tf.transformations.quaternion_from_euler(*rpy)
     return move_to_pos_quat(group, pos, quat)
 
 def move_to_pos_quat(group, pos, quat):
+    pos = pos.astype(float)
+    quat = quat.astype(float)
+
     pose_goal = Pose(Point(*pos), Quaternion(*quat))
 
     group.set_pose_target(pose_goal)
@@ -40,6 +44,7 @@ def move_to_pos_quat(group, pos, quat):
     return plan_success
 
 def rollout_to_waypoints(y_r):
+    y_r = y_r.astype(float)
     waypoints = []
     for y in y_r:
         # Convert the eulers to quaternions first...
@@ -50,7 +55,7 @@ def rollout_to_waypoints(y_r):
     return waypoints
 
 
-def play_back(weights, y_start, y_goal, right_start):
+def play_back(weights, y_start, y_goal, right_start, orig_rollout):
     rospy.init_node('dmp_playback', anonymous=True)
 
     robot = moveit_commander.RobotCommander()
@@ -66,48 +71,69 @@ def play_back(weights, y_start, y_goal, right_start):
     dt = 0.01
 
     dmp = DMP(basis_fs, dt, 6)
-    rollout = dmp.rollout_torch(y_start, y_goal, weights, 1.0)[0][0].detach().cpu()
+
+    print("Ys just before rollout:")
+    print("Y_start", y_start)
+    print("Y_goal", y_goal)
+    rollout = dmp.rollout_torch(y_start.unsqueeze(0), y_goal.unsqueeze(0), weights, 1.0)[0][0].detach().cpu()
+
+    # chart_given_rollout(orig_rollout, rollout)
 
     # You will need to move with respect to rpy, but remember its normed, so undo the norm first!
     rollout[:, 3:] = rollout[:, 3:] * np.pi
-    y_start[:, 3:] = y_start[:, 3:] * np.pi
-    y_goal[:, 3:] = y_goal[:, 3:] * np.pi
-    right_start[:, 3:] = right_start[:, 3:] * np.pi
+    y_start[3:] = y_start[3:] * np.pi
+    y_goal[3:] = y_goal[3:] * np.pi
+    right_start[3:] = right_start[3:] * np.pi
 
 
     rate = rospy.Rate(0.5)
 
     # First, move to the start position (left and right arms)
-    move_to_pos_rpy(l_group, y_start[0:3], y_start[3:])
-    move_to_pos_rpy(r_group, right_start[0:3], right_start[3:])
+    print("Moving to start positions")
+    move_to_pos_rpy(l_group, y_start[0:3].cpu().numpy(), y_start[3:].cpu().numpy())
+    move_to_pos_rpy(r_group, right_start[0:3].cpu().numpy(), right_start[3:].cpu().numpy())
+    print("Finished moving to start positions")
 
-    while not rospy.is_shutdown():
-        waypoints = rollout_to_waypoints(rollout)
-        print("Executing")
+    print("Rolling out waypoints")
+    waypoints = rollout_to_waypoints(rollout.cpu().numpy())
+    # orig_rollout[:, 3:] = orig_rollout[:, 3:] * np.pi
+    # waypoints = rollout_to_waypoints(orig_rollout.cpu().numpy())
+    print("Executing")
 
-        plan, _ = l_group.compute_cartesian_path(waypoints, 0.01, 0.0)
-        l_group.execute(plan, wait=True)
-        l_group.stop()
-        l_group.clear_pose_targets()
-        
-        print("Finished Executing DMP")
-        rospy.sleep(2)
+    plan, _ = l_group.compute_cartesian_path(waypoints, 0.01, 0.0)
+    l_group.execute(plan, wait=True)
+    l_group.stop()
+    l_group.clear_pose_targets()
+    
+    print("Finished Executing DMP")
+    rospy.sleep(3)
+
+    # print("Returning to start pos")
+    # move_to_pos_rpy(l_group, y_start[0:3].cpu().numpy(), y_start[3:].cpu().numpy())
+    # move_to_pos_rpy(r_group, right_start[0:3].cpu().numpy(), right_start[3:].cpu().numpy())
 
 
-data_folder = sys.argv[1]
-model_folder = sys.argv[2]
+if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        print("Usage: python play_constrained_dmp.py <data-folder> <model-folder>")
+        sys.exit(0)
 
-start_state = np_to_pgpu(load_dmp_demos(data_folder)[0])[0]
+    data_folder = sys.argv[1]
+    model_folder = sys.argv[2]
 
-y_start = start_state[0]
-y_goal = start_state[-1]
-right_start = start_state[1]
+    start_state = np_to_pgpu(load_dmp_demos(data_folder)[0])[0]
+    pose_hists = np_to_pgpu(load_dmp_demos(data_folder)[1])[0]
 
-basis_fs = 30
-dt = 0.01
-model = DMPNN(start_state.numel(), 1024, start_state.shape[0], basis_fs)
-model.load_state_dict(torch.load(join(model_folder, "learned_model_epoch_final.pt")))
-model.eval()
-weights = model(start_state.unsqueeze(0))
+    y_start = start_state[0]
+    y_goal = start_state[-1]
+    right_start = start_state[1]
 
-play_back(weights, y_start, y_goal, right_start)
+    basis_fs = 30
+    dt = 0.01
+    model = DMPNN(start_state.numel(), 1024, start_state.shape[1], basis_fs).cuda()
+    model.load_state_dict(torch.load(join(model_folder, "learned_model_epoch_final.pt")))
+    model.eval()
+    print("Start states: ", start_state)
+    weights = model(start_state.unsqueeze(0))
+
+    play_back(weights, y_start, y_goal, right_start, pose_hists)

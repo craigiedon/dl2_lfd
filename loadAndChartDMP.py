@@ -1,16 +1,33 @@
 import torch
-from torch import nn, optim, autograd
-from ltl_diff import constraints, oracle
 import os
 from os.path import join
 from nns.dmp_nn import DMPNN
 from dmps.dmp import load_dmp_demos, DMP
 from helper_funcs.conversions import np_to_pgpu
 from helper_funcs.utils import t_stamp
-from torch.utils.data import TensorDataset, DataLoader
 import numpy as np
 import matplotlib.pyplot as plt
 import sys
+
+def chart_given_rollout(orig_rollout, learned_rollout):
+    T, dims = learned_rollout.shape
+    for d in range(dims):
+        plt.subplot(3,3, d + 1)
+
+        dmp_timescale = np.linspace(0, 1, T)
+        plt.scatter(dmp_timescale, orig_rollout.detach().cpu()[:, d], label="Demo", c='orange', alpha=0.5)
+        # if(d < 3):
+        #     plt.plot([0.0, 1.0], [inputs[2][d].cpu(), inputs[2][d].cpu()])
+        plt.scatter(dmp_timescale, learned_rollout.detach().cpu()[:, d], label="DMP + LTL", alpha=0.5)
+
+    # plt.subplot(3,3,7)
+    # plt.scatter(rollout.detach().cpu()[:, 0], rollout.detach().cpu()[:, 1], label="Demo", c='orange', alpha=0.5)
+    # plt.scatter(learned_rollout[:, 0], learned_rollout[:, 1])
+    # # plt.scatter(inputs[1, 0].cpu(), inputs[1, 1].cpu())
+    # plt.scatter([0.5], [0.5])
+    # plt.gca().add_patch(plt.Circle([0.15, 0.5], radius=0.1, color="red", alpha=0.1))
+    plt.legend()
+    plt.show()
 
 def chart_multidim_DMP(data_folder, model_folder):
     start_states, pose_hists = load_dmp_demos(data_folder)
