@@ -7,3 +7,4 @@ demos/
 *.mp4
 saved_models
 presentableResults
+.idea

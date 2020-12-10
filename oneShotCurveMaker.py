@@ -1,14 +1,9 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import numpy as np
-from numpy.random import uniform as unif
-from scipy import interpolate
-from scipy.interpolate import CubicSpline
-from scipy import optimize
-from helper_funcs.utils import t_stamp
 import os
-from os.path import join
 import data_gen.curve_funcs as cf
+
 
 def gen_multiple_curves(demo_name, num_demos, curve_fun, *curve_args):
     # demo_dir = "demos/{}-{}".format(demo_name, t_stamp())
@@ -43,7 +38,7 @@ def gen_multiple_curves(demo_name, num_demos, curve_fun, *curve_args):
 
 
 show_plots = False
-gen_multiple_curves("avoid", 1000, cf.simpleCurveWithAvoidPoint, ([0.0, 0.0], [0.1,0.1]), ([0.9, 0.9], [1.0, 1.0]), ([0.25, 0.25], [0.8, 0.8]), show_plots)
+gen_multiple_curves("avoid", 1000, cf.simpleCurveWithAvoidPoint, ([0.0, 0.0], [0.1, 0.1]), ([0.9, 0.9], [1.0, 1.0]), ([0.25, 0.25], [0.8, 0.8]), show_plots)
 gen_multiple_curves("patrol", 1000, cf.simpleCurveWithTwoPatrols, ([0.0, 0.0], [0.1, 0.1]), ([0.9, 0.9], [1.0, 1.0]), ([0.2, 0.2], [0.4, 0.4]), ([0.6, 0.6], [0.8, 0.8]), show_plots)
 gen_multiple_curves("stable", 1000, cf.movingSinWave, ([0.0, 0.45], [0.0, 0.55]), ([1.0, 0.4], [1.0, 0.6]), ([0.2, 0.3], [0.4, 0.7]), show_plots)
-gen_multiple_curves("slow", 1000, cf.unevenSpeeds, ([0.0, 0.0], [0.1,0.1]), ([0.9, 0.9], [1.0, 1.0]), ([0.25, 0.25], [0.8, 0.8]), show_plots)
+gen_multiple_curves("slow", 1000, cf.unevenSpeeds, ([0.0, 0.0], [0.1, 0.1]), ([0.9, 0.9], [1.0, 1.0]), ([0.25, 0.25], [0.8, 0.8]), show_plots)

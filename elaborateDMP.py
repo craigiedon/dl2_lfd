@@ -173,9 +173,10 @@ demo_constraints = {
     # )
 }
 
+"""
 # Robot Single Demo Loop:
-# demo_types = ["wobblyPour-flat"]
-# demo_types = ["redCubeReach-flat"]
+demo_types = ["wobblyPour-flat"]
+demo_types = ["redCubeReach-flat"]
 demo_types = ["wobblyPour-flat", "redCubeReach-flat"]
 results_root = "logs/robot-exps-{}".format(t_stamp())
 enforcement_types = ["unconstrained", "train"]
@@ -202,64 +203,62 @@ for demo_type in demo_types:
         constraint = demo_constraints[demo_type]
 
         learned_model = training_loop(train_set, None, constraint, enforce, False, results_folder)
+"""
 
 
+"""
 # Generalized Demonstration Loop:
-# demo_types = ["patrol", "slow", "stable"]
-# enforcement_types = ["unconstrained", "train", "adversarial"]
-# results_root = "logs/generalized-exps-{}".format(t_stamp())
-# for demo_type in demo_types:
-#     for enforce_type in enforcement_types:
-#         if enforce_type == "unconstrained":
-#             enforce, adversarial = False, False
-#         if enforce_type == "train":
-#             enforce, adversarial = True, False
-#         if enforce_type == "adversarial":
-#             enforce, adversarial = True, True
-#         print("{}, {}".format(demo_type, enforce_type))
-#         demo_folder = "demos/{}".format(demo_type)
+demo_types = ["avoid", "patrol", "slow", "stable"]
+enforcement_types = ["unconstrained", "train", "adversarial"]
+results_root = "logs/generalized-exps-{}".format(t_stamp())
+for demo_type in demo_types:
+    for enforce_type in enforcement_types:
+        if enforce_type == "unconstrained":
+            enforce, adversarial = False, False
+        if enforce_type == "train":
+            enforce, adversarial = True, False
+        if enforce_type == "adversarial":
+            enforce, adversarial = True, True
+        print("{}, {}".format(demo_type, enforce_type))
+        demo_folder = "demos/{}".format(demo_type)
 
-#         t_num = 100
-#         t_start_states, t_pose_hists = load_dmp_demos(demo_folder + "/train")
-#         t_start_states, t_pose_hists = np_to_pgpu(t_start_states), np_to_pgpu(t_pose_hists)
-#         train_set = TensorDataset(t_start_states[0:t_num], t_pose_hists[0:t_num])
+        t_num = 100
+        t_start_states, t_pose_hists = load_dmp_demos(demo_folder + "/train")
+        t_start_states, t_pose_hists = np_to_pgpu(t_start_states), np_to_pgpu(t_pose_hists)
+        train_set = TensorDataset(t_start_states[0:t_num], t_pose_hists[0:t_num])
 
-#         v_num = 20
-#         v_start_states, v_pose_hists = load_dmp_demos(demo_folder + "/val")
-#         v_start_states, v_pose_hists = np_to_pgpu(v_start_states), np_to_pgpu(v_pose_hists)
-#         val_set = TensorDataset(v_start_states[0:v_num], v_pose_hists[0:v_num])
+        v_num = 20
+        v_start_states, v_pose_hists = load_dmp_demos(demo_folder + "/val")
+        v_start_states, v_pose_hists = np_to_pgpu(v_start_states), np_to_pgpu(v_pose_hists)
+        val_set = TensorDataset(v_start_states[0:v_num], v_pose_hists[0:v_num])
 
-#         results_folder = join(results_root, "{}-{}".format(demo_type, enforce_type))
-#         os.makedirs(results_folder, exist_ok=True)
+        results_folder = join(results_root, "{}-{}".format(demo_type, enforce_type))
+        os.makedirs(results_folder, exist_ok=True)
 
-#         constraint = demo_constraints[demo_type]
+        constraint = demo_constraints[demo_type]
 
-#         learned_model = training_loop(train_set, val_set, constraint, enforce, adversarial, results_folder)
+        learned_model = training_loop(train_set, val_set, constraint, enforce, adversarial, results_folder)
+"""
 
 
 
 
 # Single Demonstration Loop
-# for demo_type in ["slow"]:
-#     for i in range(5):
-#         for enforce_constraint in [True, False]:
-#             print("{}, {}, {}".format(demo_type, i, enforce_constraint))
-#             demo_folder = "demos/{}".format(demo_type)
+for demo_type in ["avoid", "patrol", "slow", "stable"]:
+    for i in range(5):
+        for enforce_constraint in [True, False]:
+            print("{}, {}, {}".format(demo_type, i, enforce_constraint))
+            demo_folder = "demos/{}".format(demo_type)
 
-#             t_start_states, t_pose_hists = load_dmp_demos(demo_folder + "/train")
-#             t_start_states = np_to_pgpu(t_start_states)
-#             t_pose_hists = np_to_pgpu(t_pose_hists)
-#             train_set = TensorDataset(t_start_states[i:i+1], t_pose_hists[i:i+1])
+            t_start_states, t_pose_hists = load_dmp_demos(demo_folder + "/train")
+            t_start_states = np_to_pgpu(t_start_states)
+            t_pose_hists = np_to_pgpu(t_pose_hists)
+            train_set = TensorDataset(t_start_states[i:i+1], t_pose_hists[i:i+1])
 
-#             # v_start_states, v_pose_hists = load_dmp_demos(demo_folder + "/val")
-#             # v_start_states = np_to_pgpu(v_start_states)
-#             # v_pose_hists = np_to_pgpu(v_pose_hists)
-#             # val_set = TensorDataset(v_start_states, v_pose_hists)
+            # Create time-stamped results folder TODO: (possibly move this out to a util func?)
+            results_folder_variable = "logs/single-shot-experiments/{}-{}-enforce{}".format(demo_type, i, enforce_constraint)
+            os.makedirs(results_folder_variable, exist_ok=True)
 
-#             # Create time-stamped results folder (possibly move this out to a util func?)
-#             results_folder_variable = "logs/single-shot-experiments/{}-{}-enforce{}".format(demo_type, i, enforce_constraint)
-#             os.makedirs(results_folder_variable, exist_ok=True)
+            constraint = demo_constraints[demo_type]
 
-#             constraint = demo_constraints[demo_type]
-
-#             learned_model = training_loop(train_set, None, constraint, enforce_constraint, False, results_folder_variable)
+            learned_model = training_loop(train_set, None, constraint, enforce_constraint, False, results_folder_variable)
