@@ -1,6 +1,6 @@
 # Elaborating on Learned Demonstrations with Temporal Logic Specifications
 
-The larger supporting code-base for experiments run in the RSS-2020 paper: [Elaborating on Learned Demonstrations with Temporal Logic Specifications](https://roboticsconference.org/2020/program/papers/4.html)
+The larger (somewhat messier) supporting code-base for experiments run in the RSS-2020 paper: [Elaborating on Learned Demonstrations with Temporal Logic Specifications](https://roboticsconference.org/2020/program/papers/4.html)
 
 Note: For just the specific code relating to differentiable metrics for Linear Temporal Logic, see the submodule [LTL-Diff](https://github.com/craigiedon/ltl_diff)
 
